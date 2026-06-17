@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --background: #f7fafc;
+  --foreground: #172033;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(63, 125, 107, 0.12), transparent 30rem),
+    linear-gradient(135deg, #f7fafc 0%, #eef5f3 46%, #f8f5f0 100%);
+  color: var(--foreground);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(45, 108, 223, 0.45);
+  outline-offset: 3px;
+}
+
+.card {
+  border: 1px solid rgba(23, 32, 51, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 50px rgba(23, 32, 51, 0.08);
+}
+
+.print-packet {
+  background: white;
+}
+
+@media print {
+  body {
+    background: white !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-packet {
+    display: block !important;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+
+  .print-break-inside-avoid {
+    break-inside: avoid;
+  }
+}
