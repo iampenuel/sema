@@ -11,17 +11,17 @@ export function ConcernTypeSelector({
   onChange: (value: ConcernType) => void;
 }) {
   return (
-    <fieldset className="card rounded-lg p-5">
-      <legend className="text-lg font-semibold text-ink">Concern type</legend>
-      <p className="mt-1 text-sm text-muted">Choose the broad category. Phase 1 prioritizes pain/injury.</p>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+    <fieldset className="rounded-lg border border-sema-border bg-white/90 p-3.5 shadow-card">
+      <legend className="px-1 text-sm font-semibold text-ink">Concern type</legend>
+      <p className="mt-0.5 text-xs text-sema-slate">Choose the broad category for this case file.</p>
+      <div className="mt-2.5 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
         {(Object.keys(concernTypeLabels) as ConcernType[]).map((type) => (
           <button
             key={type}
             type="button"
             onClick={() => onChange(type)}
-            className={`rounded-lg border px-3 py-3 text-left text-sm font-semibold transition ${
-              value === type ? "border-sage bg-sage text-white" : "border-ink/10 bg-white text-ink hover:border-sage/40"
+            className={`min-h-10 rounded-md border px-3 py-2 text-left text-sm font-semibold transition ${
+              value === type ? "border-sema-blue bg-sema-blue text-white shadow-sm" : "border-sema-border bg-[#f7fbfd] text-ink hover:border-sema-blue/40 hover:bg-sema-pale"
             }`}
             aria-pressed={value === type}
           >

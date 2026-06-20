@@ -2,76 +2,114 @@
 
 import type { Dispatch, RefObject } from "react";
 import { buildEvidencePacket, generateStructuredSummary } from "@/lib/packet/buildPacket";
-import type { SemaSessionAction } from "@/lib/sema-session/reducer";
 import { createEmptySession } from "@/lib/sema-session/defaults";
+import { getFolderReadout, getMissingDetails } from "@/lib/sema-session/selectors";
+import type { SemaSessionAction } from "@/lib/sema-session/reducer";
+import type { DraftCapture, SemaSession, SignalFolderId } from "@/lib/sema-session/types";
+import { SEMAPHASE_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
 import type { AgentAction } from "@/lib/agent/agentTypes";
 
 type Handlers = {
   dispatch: Dispatch<SemaSessionAction>;
-  storyRef: RefObject<HTMLElement | null>;
-  bodyRef: RefObject<HTMLElement | null>;
-  audioRef: RefObject<HTMLElement | null>;
+  activePanelRef: RefObject<HTMLElement | null>;
   packetRef: RefObject<HTMLElement | null>;
-  getSession: () => Parameters<typeof buildEvidencePacket>[0];
+  getSession: () => SemaSession;
+  onNavigate: (folder: SignalFolderId) => void;
 };
+
+function summaryDraft(content: unknown): DraftCapture {
+  return {
+    id: `draft-agent-${Date.now()}`,
+    targetFolder: "story",
+    title: "Agent-drafted story summary",
+    content: JSON.stringify(content),
+    createdAt: new Date().toISOString(),
+    source: "agent_drafted",
+    status: "needs_review"
+  };
+}
 
 export function useAgentActions(handlers: Handlers) {
   function focus(ref: RefObject<HTMLElement | null>) {
-    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   function execute(action: AgentAction) {
     const session = handlers.getSession();
 
     switch (action.type) {
-      case "focusStory":
-        handlers.dispatch({ type: "set_step", step: "story" });
-        focus(handlers.storyRef);
-        return "Story signal is in focus.";
-      case "focusBodyMap":
-        handlers.dispatch({ type: "set_step", step: "body_map" });
-        focus(handlers.bodyRef);
-        return "Body/location signal is in focus.";
-      case "focusAudio":
-        handlers.dispatch({ type: "set_step", step: "audio" });
-        focus(handlers.audioRef);
-        return "Audio signal is in focus.";
-      case "focusPacket":
-        handlers.dispatch({ type: "set_step", step: "packet" });
-        focus(handlers.packetRef);
-        return "Evidence packet preview is in focus.";
-      case "generateEvidenceSummary":
-        handlers.dispatch({ type: "set_structured_summary", summary: generateStructuredSummary(session.story.rawText) });
-        return "I generated an AI-organized summary from the patient-provided story.";
-      case "generateClinicianQuestions": {
-        const summary = session.story.structuredSummary ?? generateStructuredSummary(session.story.rawText);
-        handlers.dispatch({
-          type: "set_structured_summary",
-          summary: {
-            ...summary,
-            clinicianQuestions: [
-              ...summary.clinicianQuestions,
-              "What context would help you understand what changed over time?",
-              "Should I track location, intensity, timing, or activities before the next conversation?"
-            ]
-          }
-        });
-        return "I added clinician-facing questions without adding medical advice.";
+      case "openSignalFolder": {
+        const folder = action.payload?.folder as SignalFolderId | undefined;
+        if (!folder) return "I could not identify that folder.";
+        handlers.onNavigate(folder);
+        handlers.dispatch({ type: "open_folder", folder });
+        focus(folder === "packet" ? handlers.packetRef : handlers.activePanelRef);
+        const labels: Record<SignalFolderId, string> = { story: "Story", body_location: "Body/Location", audio: "Audio", motion_visual: "Motion/Visual", packet: "Evidence Packet" };
+        return `Opened the ${labels[folder]} Signal Folder.`;
       }
-      case "preparePacketDraft":
+      case "readSignalFolder": {
+        const folder = action.payload?.folder as SignalFolderId | undefined;
+        return folder ? getFolderReadout(session, folder) : "I could not identify that folder.";
+      }
+      case "listMissingDetails": {
+        const missing = getMissingDetails(session);
+        return missing.length ? `These details may make the packet more useful: ${missing.join(" ")}` : "No major packet details are currently missing.";
+      }
+      case "readSafetyNote":
+        return SEMAPHASE_SAFETY_NOTE;
+      case "readCurrentPage":
+        return "This session workspace contains flexible Story, Body/Location, Audio, and Motion/Visual folders, followed by review, packet readiness, and packet preview.";
+      case "generateStorySummary": {
+        if (!session.story.rawText.trim()) return "Add patient-provided story text before generating a summary.";
+        const summary = generateStructuredSummary(session.story.rawText);
+        handlers.dispatch({ type: "set_structured_summary", summary, draft: summaryDraft(summary) });
+        return "I drafted an organized story summary from patient-provided information. Review and approve it before packet preparation.";
+      }
+      case "generateClinicianQuestions": {
+        if (!session.story.rawText.trim()) return "Add patient-provided story text before drafting clinician questions.";
+        const base = session.story.structuredSummary ?? generateStructuredSummary(session.story.rawText);
+        const summary = {
+          ...base,
+          clinicianQuestions: Array.from(new Set([
+            ...base.clinicianQuestions,
+            "What context would help you understand what changed over time?",
+            "Which details would be useful for me to keep tracking?"
+          ]))
+        };
+        handlers.dispatch({ type: "set_structured_summary", summary, draft: summaryDraft(summary) });
+        return "I drafted clinician questions from the saved story. Review them before they become packet-ready.";
+      }
+      case "prepareEvidencePacket":
+        if (session.story.summaryStatus === "needs_review") return "The organized story summary still needs your review. Approve or discard it before preparing the packet.";
         handlers.dispatch({ type: "set_packet", packet: buildEvidencePacket(session) });
         focus(handlers.packetRef);
-        return "The evidence packet preview is ready.";
+        return "The evidence packet preview is ready from saved, approved session content.";
+      case "saveDraftToFolder": {
+        const id = action.payload?.id as string | undefined;
+        if (!id) return "I could not identify that draft.";
+        handlers.dispatch({ type: "approve_draft_capture", id });
+        return "The reviewed draft was saved to the session.";
+      }
+      case "readPacketSection":
+        return session.packetDraft ? "The packet draft is available in the preview below." : "No packet draft has been prepared yet.";
       case "exportPacketPdf":
+        if (!session.packetDraft) return "Prepare a packet draft before exporting.";
         window.print();
         return "The browser print/export dialog has opened.";
       case "clearSession":
         handlers.dispatch({ type: "replace_session", session: createEmptySession() });
-        return "This browser session has been cleared.";
-      case "readCurrentPage":
-      case "explainCurrentStep":
-      case "readSafetyNote":
-      case "listMissingFields":
+        handlers.onNavigate("story");
+        return "Session cleared from this browser.";
+      case "deleteAudio": {
+        const id = action.payload?.id as string | undefined;
+        if (!id) return "I could not identify that audio observation.";
+        handlers.dispatch({ type: "remove_audio_signal", id });
+        return "The selected audio observation was deleted.";
+      }
+      case "sharePacket":
+        return "Sharing is not connected in this local phase. The packet remains in this browser.";
+      case "blockedSafetyResponse":
+        return "This request is blocked by Sema's safety boundary.";
       default:
         return "Done.";
     }

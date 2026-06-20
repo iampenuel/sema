@@ -15,7 +15,7 @@ function TextListEditor({
     <label className="block">
       <span className="text-sm font-semibold text-ink">{label}</span>
       <textarea
-        className="mt-1 min-h-24 w-full rounded-lg border border-ink/10 bg-white px-3 py-2 text-sm text-ink"
+        className="mt-1 min-h-24 w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm text-ink"
         value={values.join("\n")}
         onChange={(event) => onChange(event.target.value.split("\n").filter(Boolean))}
       />
@@ -32,20 +32,20 @@ export function StructuredSummaryCard({
 }) {
   if (!summary) {
     return (
-      <div className="rounded-lg border border-dashed border-ink/20 bg-white/70 p-4 text-sm text-muted">
+      <div className="rounded-md border border-sema-border bg-[#f8fbfd] p-4 text-sm text-sema-slate">
         No AI-organized summary yet. Generate one after saving patient-provided story text.
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 rounded-lg border border-sage/20 bg-sage/5 p-4">
+    <div className="space-y-4 rounded-md border border-sema-border bg-sema-pale/45 p-4">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sage">AI-organized from patient-provided information</p>
+        <p className="text-xs font-bold text-sema-blue">AI-ORGANIZED FROM PATIENT-PROVIDED INFORMATION</p>
         <label className="mt-3 block">
           <span className="text-sm font-semibold text-ink">Main concern</span>
           <textarea
-            className="mt-1 min-h-20 w-full rounded-lg border border-ink/10 bg-white px-3 py-2 text-sm text-ink"
+            className="mt-1 min-h-20 w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm text-ink"
             value={summary.mainConcern}
             onChange={(event) => onChange({ ...summary, mainConcern: event.target.value })}
           />
@@ -57,7 +57,7 @@ export function StructuredSummaryCard({
           {summary.timeline.map((item, index) => (
             <input
               key={item.id}
-              className="w-full rounded-lg border border-ink/10 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm"
               value={`${item.label}: ${item.detail}`}
               onChange={(event) => {
                 const next = [...summary.timeline];

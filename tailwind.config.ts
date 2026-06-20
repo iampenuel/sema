@@ -10,15 +10,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#172033",
-        muted: "#667085",
-        paper: "#f7fafc",
-        sage: "#3f7d6b",
-        clay: "#a45d45",
-        blue: "#2d6cdf"
+        ink: "#102033",
+        muted: "#627386",
+        paper: "#f6fafc",
+        sage: "#2f7d67",
+        clay: "#b84a4a",
+        blue: "#2f6fa3",
+        "sema-blue": "#2f6fa3",
+        "sema-blue-dark": "#1f5f99",
+        "sema-pale": "#eaf5fb",
+        "sema-border": "#c8d8e5",
+        "sema-slate": "#53687a",
+        "sema-green": "#2f7d67"
       },
       boxShadow: {
-        soft: "0 18px 50px rgba(23, 32, 51, 0.10)"
+        soft: "0 18px 50px rgba(16, 32, 51, 0.10)",
+        card: "0 12px 34px rgba(31, 95, 153, 0.08)",
+        blue: "0 12px 30px rgba(47, 111, 163, 0.24)",
+        packet: "0 28px 60px rgba(31, 95, 153, 0.22)"
       }
     }
   },

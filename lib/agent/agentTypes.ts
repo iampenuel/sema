@@ -1,21 +1,23 @@
-import type { SafetyFlag, SemaSession } from "@/lib/sema-session/types";
+import type { ConcernType, FolderStatus, SafetyFlag, SignalFolderId } from "@/lib/sema-session/types";
 
 export type AgentActionType =
+  | "openSignalFolder"
+  | "readSignalFolder"
   | "readCurrentPage"
-  | "explainCurrentStep"
   | "readSafetyNote"
-  | "listMissingFields"
-  | "focusStory"
-  | "focusBodyMap"
-  | "focusAudio"
-  | "focusPacket"
-  | "generateEvidenceSummary"
+  | "listMissingDetails"
+  | "generateStorySummary"
   | "generateClinicianQuestions"
-  | "preparePacketDraft"
+  | "prepareEvidencePacket"
+  | "saveDraftToFolder"
+  | "readPacketSection"
   | "exportPacketPdf"
-  | "clearSession";
+  | "clearSession"
+  | "deleteAudio"
+  | "sharePacket"
+  | "blockedSafetyResponse";
 
-export type AgentActionRiskLevel = "read_only" | "navigation" | "write" | "high_impact";
+export type AgentActionRiskLevel = "read_only" | "navigation" | "write" | "high_impact" | "blocked";
 
 export type AgentAction = {
   id: string;
@@ -27,11 +29,7 @@ export type AgentAction = {
   payload?: Record<string, unknown>;
 };
 
-export type PermissionOutcome =
-  | "not_required"
-  | "permission_required"
-  | "explicit_confirmation_required"
-  | "blocked_by_safety";
+export type PermissionOutcome = "not_required" | "permission_required" | "explicit_confirmation_required" | "blocked_by_safety";
 
 export type PermissionDecision = {
   outcome: PermissionOutcome;
@@ -53,7 +51,19 @@ export type AgentResponse = {
   blocked?: boolean;
 };
 
-export type AgentContext = {
-  session: SemaSession;
+export type AgentContextSnapshot = {
   currentRoute: string;
+  activeFolder: SignalFolderId;
+  concernType?: ConcernType;
+  folderStatuses: Record<SignalFolderId, FolderStatus>;
+  hasStory: boolean;
+  hasSummary: boolean;
+  summaryApproved: boolean;
+  bodyLocationObservationCount: number;
+  audioSignalCount: number;
+  motionVisualNoteCount: number;
+  hasPacketDraft: boolean;
+  missingDetails: string[];
+  safetyFlags: SafetyFlag[];
+  availableActions: AgentActionType[];
 };

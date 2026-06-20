@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText } from "lucide-react";
+import { FileText, ShieldCheck } from "lucide-react";
 import { PdfExportButton } from "./PdfExportButton";
 import type { EvidencePacket } from "@/lib/sema-session/types";
 import { concernTypeLabels, signalTypeLabels } from "@/lib/sema-session/types";
@@ -8,11 +8,21 @@ import { concernTypeLabels, signalTypeLabels } from "@/lib/sema-session/types";
 export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
   if (!packet) {
     return (
-      <section className="card rounded-lg p-5" aria-labelledby="packet-title">
-        <h2 id="packet-title" className="text-2xl font-bold text-ink">Evidence packet preview</h2>
-        <p className="mt-2 rounded-lg border border-dashed border-ink/20 bg-white/70 p-4 text-sm text-muted">
-          No packet yet. Prepare a packet draft when you are ready.
-        </p>
+      <section className="rounded-lg border border-sema-border bg-[#dceaf4] p-3 shadow-card" aria-labelledby="packet-title">
+        <div className="rounded-md border border-sema-border bg-white p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold text-sema-blue">EVIDENCE PACKET PREVIEW</p>
+              <h2 id="packet-title" className="mt-1 font-editorial text-3xl font-semibold text-ink">Sema Evidence Packet</h2>
+            </div>
+            <span className="rounded-full bg-[#f1f5f8] px-3 py-1 text-xs font-semibold text-sema-slate">Not prepared</span>
+          </div>
+          <div className="mt-6 flex flex-col items-center justify-center rounded-md border border-sema-border bg-[#f8fbfd] px-6 py-10 text-center">
+            <FileText className="h-8 w-8 text-sema-blue" aria-hidden="true" />
+            <p className="mt-3 font-semibold text-ink">No packet prepared yet.</p>
+            <p className="mt-1 max-w-lg text-sm leading-6 text-sema-slate">Complete at least one signal folder, then prepare a packet preview.</p>
+          </div>
+        </div>
       </section>
     );
   }
@@ -20,28 +30,36 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
   const summary = packet.aiOrganizedSummary;
 
   return (
-    <section className="print-packet card rounded-lg p-5" aria-labelledby="packet-title">
+    <section className="print-packet rounded-lg border border-[#aec7da] bg-[#dceaf4] p-3 shadow-packet" aria-labelledby="packet-title">
+      <div className="rounded-md border border-sema-border bg-white p-5 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.16em] text-sage">
+          <p className="flex items-center gap-2 text-xs font-bold text-sema-blue">
             <FileText className="h-4 w-4" aria-hidden="true" />
-            Generated from patient-provided information
+            GENERATED FROM PATIENT-PROVIDED INFORMATION
           </p>
-          <h2 id="packet-title" className="mt-2 text-3xl font-bold text-ink">Sema Evidence Packet</h2>
+          <h2 id="packet-title" className="mt-2 font-editorial text-3xl font-semibold text-ink">Sema Evidence Packet</h2>
           <p className="mt-1 text-sm text-muted">Generated {new Date(packet.generatedAt).toLocaleString()}</p>
           <p className="mt-1 text-sm text-muted">Concern type: {packet.concernType ? concernTypeLabels[packet.concernType] : "Not selected"}</p>
         </div>
         <PdfExportButton />
       </div>
 
-      <div className="mt-6 grid gap-4">
+      <div className="mt-6 grid gap-3 md:grid-cols-2">
+        <PacketSection title="Main concern">
+          <p className="font-semibold text-ink">{summary?.mainConcern ?? "No approved organized summary."}</p>
+        </PacketSection>
         <PacketSection title="Patient's own words">
           <p>{packet.patientWords || "No story provided."}</p>
         </PacketSection>
-        <PacketSection title="AI-organized summary">
+        <PacketSection title="Organized summary">
           <p className="font-semibold text-ink">{summary?.mainConcern ?? "No summary generated."}</p>
           <p className="mt-2 text-sm text-muted">{summary?.summaryNote}</p>
         </PacketSection>
+        {packet.organizedNarrative ? <PacketSection title="Approved packet narrative">
+          <p>{packet.organizedNarrative}</p>
+          {packet.organizationNotes?.length ? <ul className="mt-2 space-y-1 text-muted">{packet.organizationNotes.map((note) => <li key={note}>{note}</li>)}</ul> : null}
+        </PacketSection> : null}
         <PacketSection title="Timeline">
           <ul className="space-y-2">
             {summary?.timeline.map((item) => (
@@ -50,9 +68,9 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
           </ul>
         </PacketSection>
         <PacketSection title="Body/location observations">
-          {packet.bodyMapObservations.length ? (
+          {packet.bodyLocationObservations.length ? (
             <ul className="space-y-2">
-              {packet.bodyMapObservations.map((item) => (
+              {packet.bodyLocationObservations.map((item) => (
                 <li key={item.id}>{item.regionLabel} · {signalTypeLabels[item.signalType]}{item.intensity ? ` · ${item.intensity}/10` : ""}{item.note ? ` · ${item.note}` : ""}</li>
               ))}
             </ul>
@@ -71,22 +89,30 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
             <p>No audio observations added.</p>
           )}
         </PacketSection>
+        <PacketSection title="Motion/visual notes">
+          {packet.motionVisualNotes.length ? (
+            <ul className="space-y-2">{packet.motionVisualNotes.map((note) => <li key={note.id}>{note.note}</li>)}</ul>
+          ) : <p>No motion/visual notes added.</p>}
+        </PacketSection>
         <PacketSection title="Missing details">
           <ul className="space-y-2">
-            {summary?.missingDetails.map((detail) => <li key={detail}>{detail}</li>) ?? <li>No missing detail checklist generated.</li>}
+            {packet.missingDetails.length ? packet.missingDetails.map((detail) => <li key={detail}>{detail}</li>) : <li>No approved missing-detail checklist.</li>}
           </ul>
         </PacketSection>
         <PacketSection title="Questions for clinician">
           <ul className="space-y-2">
-            {summary?.clinicianQuestions.map((question) => <li key={question}>{question}</li>) ?? <li>No clinician questions generated.</li>}
+            {packet.clinicianQuestions.length ? packet.clinicianQuestions.map((question) => <li key={question}>{question}</li>) : <li>No approved clinician questions.</li>}
           </ul>
         </PacketSection>
-        <PacketSection title="Safety and limitations">
-          <p>{packet.safetyNote}</p>
+        <PacketSection title="Safety note">
+          <p className="flex gap-2"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-sema-green" aria-hidden="true" />{packet.safetyNote}</p>
+        </PacketSection>
+        <PacketSection title="Limitations">
           <ul className="mt-2 space-y-1">
             {packet.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
           </ul>
         </PacketSection>
+      </div>
       </div>
     </section>
   );
@@ -94,7 +120,7 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
 
 function PacketSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="print-break-inside-avoid rounded-lg border border-ink/10 bg-white p-4 text-sm leading-6 text-muted">
+    <section className="print-break-inside-avoid rounded-md border border-sema-border bg-[#f8fbfd] p-4 text-sm leading-6 text-sema-slate">
       <h3 className="mb-2 text-base font-semibold text-ink">{title}</h3>
       {children}
     </section>

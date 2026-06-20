@@ -1,4 +1,5 @@
 import type { EvidencePacket, SemaSession, StructuredSummary, TimelineItem } from "@/lib/sema-session/types";
+import { fingerprintSessionPacketSource } from "@/lib/packet/approvedContent";
 import { PACKET_LIMITATIONS, PACKET_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
 
 const missing = "Missing from current patient-provided information.";
@@ -85,19 +86,32 @@ export function generateStructuredSummary(rawText: string): StructuredSummary {
       "Are there symptoms, changes, or limitations I should keep tracking before or after the visit?",
       "What should I watch for that would change the care plan you recommend?"
     ],
-    summaryNote: "AI-organized from patient-provided information only. No diagnosis, treatment, or urgency level was generated."
+    summaryNote: "AI-organized from patient-provided information only. No diagnosis, treatment, or urgency level was generated.",
+    source: "ai_organized_from_patient_provided_information"
   };
 }
 
-export function buildEvidencePacket(session: SemaSession): EvidencePacket {
+type PacketBuildOptions = { now?: Date; id?: string };
+
+export function buildEvidencePacket(session: SemaSession, options: PacketBuildOptions = {}): EvidencePacket {
+  const approvedSummary = session.story.summaryStatus === "approved" ? session.story.structuredSummary : undefined;
+  const approvedNarrative = session.packetNarrativeDraft?.status === "approved" && session.packetNarrativeDraft.contentFingerprint === fingerprintSessionPacketSource(session)
+    ? session.packetNarrativeDraft
+    : undefined;
+  const now = options.now ?? new Date();
   return {
-    id: `packet-${Date.now()}`,
-    generatedAt: new Date().toISOString(),
+    id: options.id ?? `packet-${now.getTime()}`,
+    generatedAt: now.toISOString(),
     concernType: session.concernType,
     patientWords: session.story.rawText,
-    aiOrganizedSummary: session.story.structuredSummary,
-    bodyMapObservations: session.bodyMap,
-    audioSignals: session.audioSignals,
+    aiOrganizedSummary: approvedSummary,
+    bodyLocationObservations: session.bodyLocation,
+    audioSignals: session.audioSignals.map(({ id, name, durationSeconds, tags, notes, createdAt, source }) => ({ id, name, durationSeconds, tags, notes, createdAt, source })),
+    motionVisualNotes: session.motionVisualNotes,
+    missingDetails: Array.from(new Set([...(approvedSummary?.missingDetails ?? []), ...(approvedNarrative?.missingDetails ?? [])])),
+    clinicianQuestions: Array.from(new Set([...(approvedSummary?.clinicianQuestions ?? []), ...(approvedNarrative?.clinicianQuestions ?? [])])),
+    organizedNarrative: approvedNarrative?.conciseNarrative,
+    organizationNotes: approvedNarrative?.organizationNotes,
     safetyNote: PACKET_SAFETY_NOTE,
     limitations: PACKET_LIMITATIONS,
     label: "generated_from_patient_provided_information"

@@ -34,22 +34,22 @@ export function BodyMapSignalCard({
   }
 
   return (
-    <section className="card rounded-lg p-5" aria-labelledby="body-title">
-      <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.16em] text-sage">
+    <section className="rounded-lg border border-sema-border bg-white p-5 shadow-card" aria-labelledby="body-title">
+      <p className="flex items-center gap-2 text-xs font-bold text-sema-blue">
         <MapPinned className="h-4 w-4" aria-hidden="true" />
         Body/location signal
       </p>
       <h2 id="body-title" className="mt-2 text-2xl font-bold text-ink">Where did you notice it?</h2>
-      <p className="mt-1 text-sm text-muted">Body/location observations are patient-reported notes, not a diagnosis or proof of injury.</p>
+      <p className="mt-1 text-sm leading-6 text-sema-slate">Mark where you noticed a symptom or limitation. These are patient-reported location notes, not a diagnosis.</p>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="rounded-lg border border-ink/10 bg-gradient-to-b from-white to-sage/5 p-5">
+        <div className="rounded-md border border-sema-border bg-gradient-to-b from-white to-sema-pale/60 p-5">
           <div className="mx-auto flex h-64 max-w-56 flex-col items-center justify-center gap-2 text-center">
-            <div className="h-20 w-16 rounded-full border-2 border-sage/35 bg-white" aria-hidden="true" />
-            <div className="h-28 w-20 rounded-[32px] border-2 border-sage/35 bg-white" aria-hidden="true" />
+            <div className="h-20 w-16 rounded-full border-2 border-sema-blue/35 bg-white" aria-hidden="true" />
+            <div className="h-28 w-20 rounded-[32px] border-2 border-sema-blue/35 bg-white" aria-hidden="true" />
             <div className="grid w-48 grid-cols-2 gap-3" aria-hidden="true">
-              <div className="h-20 rounded-full border-2 border-sage/35 bg-white" />
-              <div className="h-20 rounded-full border-2 border-sage/35 bg-white" />
+              <div className="h-20 rounded-full border-2 border-sema-blue/35 bg-white" />
+              <div className="h-20 rounded-full border-2 border-sema-blue/35 bg-white" />
             </div>
           </div>
           <p className="text-center text-xs text-muted">Simplified visual placeholder. Use the form to record patient-stated location notes.</p>
@@ -58,7 +58,7 @@ export function BodyMapSignalCard({
         <form action={handleSubmit} className="space-y-3">
           <label className="block">
             <span className="text-sm font-semibold text-ink">Region</span>
-            <select name="regionLabel" className="mt-1 w-full rounded-lg border border-ink/10 bg-white px-3 py-2 text-sm" defaultValue="Right wrist / hand">
+            <select name="regionLabel" className="mt-1 w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm" defaultValue="Right wrist / hand">
               {regions.map((region) => (
                 <option key={region}>{region}</option>
               ))}
@@ -66,7 +66,7 @@ export function BodyMapSignalCard({
           </label>
           <label className="block">
             <span className="text-sm font-semibold text-ink">Signal type</span>
-            <select name="signalType" className="mt-1 w-full rounded-lg border border-ink/10 bg-white px-3 py-2 text-sm" defaultValue="pain">
+            <select name="signalType" className="mt-1 w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm" defaultValue="pain">
               {(Object.keys(signalTypeLabels) as BodyMapObservation["signalType"][]).map((signal) => (
                 <option key={signal} value={signal}>{signalTypeLabels[signal]}</option>
               ))}
@@ -78,20 +78,20 @@ export function BodyMapSignalCard({
           </label>
           <label className="block">
             <span className="text-sm font-semibold text-ink">Note, optional</span>
-            <textarea name="note" className="mt-1 min-h-20 w-full rounded-lg border border-ink/10 bg-white px-3 py-2 text-sm" placeholder="Patient-stated note, such as movement limitation or when it happens." />
+            <textarea name="note" className="mt-1 min-h-20 w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm" placeholder="Patient-stated note, such as movement limitation or when it happens." />
           </label>
-          <button type="submit" className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white hover:bg-ink/90">Save observation</button>
+          <button type="submit" className="rounded-md bg-sema-blue px-4 py-2 text-sm font-semibold text-white hover:bg-sema-blue-dark">Save observation</button>
         </form>
       </div>
 
       <div className="mt-5">
         <h3 className="text-sm font-semibold text-ink">Saved observations</h3>
-        {session.bodyMap.length === 0 ? (
-          <p className="mt-2 rounded-lg border border-dashed border-ink/20 bg-white/70 p-4 text-sm text-muted">No body/location observations yet.</p>
+        {session.bodyLocation.length === 0 ? (
+          <p className="mt-2 rounded-md border border-sema-border bg-[#f8fbfd] p-4 text-sm text-sema-slate">Add a marker to show where you noticed a symptom or limitation.</p>
         ) : (
           <ul className="mt-2 grid gap-2">
-            {session.bodyMap.map((item) => (
-              <li key={item.id} className="flex items-start justify-between gap-3 rounded-lg border border-ink/10 bg-white p-3 text-sm">
+            {session.bodyLocation.map((item) => (
+              <li key={item.id} className="flex items-start justify-between gap-3 rounded-md border border-sema-border bg-white p-3 text-sm">
                 <div>
                   <p className="font-semibold text-ink">{item.regionLabel} · {signalTypeLabels[item.signalType]}</p>
                   <p className="text-muted">{item.note || "No note added."}{typeof item.intensity === "number" ? ` Intensity: ${item.intensity}/10.` : ""}</p>

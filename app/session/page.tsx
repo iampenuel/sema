@@ -3,7 +3,7 @@ import { SessionWorkspace } from "@/components/session/SessionWorkspace";
 
 export default function SessionPage() {
   return (
-    <SemaShell status="Client-only session">
+    <SemaShell status="Client-only session" session>
       <SessionWorkspace />
     </SemaShell>
   );

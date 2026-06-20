@@ -8,8 +8,8 @@ export function AgentMessageList({ messages }: { messages: AgentMessage[] }) {
       {messages.map((message) => (
         <div
           key={message.id}
-          className={`rounded-lg px-3 py-2 text-sm leading-6 ${
-            message.role === "agent" ? "bg-white text-ink" : "bg-ink text-white"
+          className={`rounded-md px-3 py-2 text-sm leading-6 ${
+            message.role === "agent" ? "border border-sema-border bg-white text-ink" : "bg-sema-blue text-white"
           }`}
         >
           {message.content}

@@ -5,11 +5,15 @@ export type ConcernType =
   | "report_document"
   | "other";
 
+export type SignalFolderId = "story" | "body_location" | "audio" | "motion_visual" | "packet";
+
+export type FolderStatus = "empty" | "in_progress" | "saved" | "needs_review" | "optional" | "planned_later";
+
 export type TimelineItem = {
   id: string;
   label: string;
   detail: string;
-  source: "patient_stated" | "ai_organized";
+  source: "patient_stated" | "ai_organized" | "demo_generated";
 };
 
 export type StructuredSummary = {
@@ -22,10 +26,13 @@ export type StructuredSummary = {
   missingDetails: string[];
   clinicianQuestions: string[];
   summaryNote: string;
+  source: "ai_organized_from_patient_provided_information" | "demo_generated";
 };
 
 export type BodyMapObservation = {
   id: string;
+  x?: number;
+  y?: number;
   regionLabel: string;
   signalType:
     | "pain"
@@ -52,17 +59,41 @@ export type AudioSignal = {
   source: "patient_recorded" | "demo_simulated";
 };
 
+export type PacketAudioSignal = Pick<AudioSignal, "id" | "name" | "durationSeconds" | "tags" | "notes" | "createdAt" | "source">;
+
+export type MotionVisualNote = {
+  id: string;
+  note: string;
+  createdAt: string;
+  source: "patient_stated";
+};
+
 export type EvidencePacket = {
   id: string;
   generatedAt: string;
   concernType?: ConcernType;
   patientWords: string;
   aiOrganizedSummary?: StructuredSummary;
-  bodyMapObservations: BodyMapObservation[];
-  audioSignals: AudioSignal[];
+  bodyLocationObservations: BodyMapObservation[];
+  audioSignals: PacketAudioSignal[];
+  motionVisualNotes: MotionVisualNote[];
+  missingDetails: string[];
+  clinicianQuestions: string[];
+  organizedNarrative?: string;
+  organizationNotes?: string[];
   safetyNote: string;
   limitations: string[];
   label: "generated_from_patient_provided_information";
+};
+
+export type PacketNarrativeDraft = {
+  conciseNarrative: string;
+  missingDetails: string[];
+  clinicianQuestions: string[];
+  organizationNotes: string[];
+  source: "ai_organized_from_approved_information" | "local_organized_from_approved_information";
+  status: "needs_review" | "approved";
+  contentFingerprint: string;
 };
 
 export type SafetyFlag = {
@@ -81,20 +112,33 @@ export type SafetyFlag = {
   severity: "info" | "caution" | "blocked";
 };
 
-export type SemaStep = "start" | "story" | "body_map" | "audio" | "packet";
+export type DraftCapture = {
+  id: string;
+  targetFolder: SignalFolderId;
+  title: string;
+  content: string;
+  createdAt: string;
+  source: "agent_drafted" | "voice_drafted" | "demo_generated";
+  status: "needs_review" | "approved" | "discarded";
+};
 
 export type SemaSession = {
   id: string;
   concernType?: ConcernType;
+  activeFolder: SignalFolderId;
+  folderStatus: Record<SignalFolderId, FolderStatus>;
   story: {
     rawText: string;
     structuredSummary?: StructuredSummary;
+    summaryStatus?: "needs_review" | "approved";
   };
-  bodyMap: BodyMapObservation[];
+  bodyLocation: BodyMapObservation[];
   audioSignals: AudioSignal[];
+  motionVisualNotes: MotionVisualNote[];
   packetDraft?: EvidencePacket;
+  packetNarrativeDraft?: PacketNarrativeDraft;
+  draftCaptures: DraftCapture[];
   safetyFlags: SafetyFlag[];
-  currentStep: SemaStep;
   updatedAt: string;
 };
 

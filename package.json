@@ -6,15 +6,23 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:ai": "node --import tsx lib/ai/evals/runLocalEvals.ts",
+    "test:ai:model": "node --import tsx lib/ai/evals/testModelPreflight.ts",
+    "test:ai:live": "node --import tsx lib/ai/evals/runLiveSmoke.ts",
+    "test:ai:live:story:debug": "node --import tsx lib/ai/evals/debugLiveStory.ts",
+    "test:ai:live:packet": "node --import tsx lib/ai/evals/testLivePacketDraft.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.9.0",
     "lucide-react": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@next/env": "^16.2.9",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
@@ -23,6 +31,7 @@
     "eslint-config-next": "latest",
     "postcss": "latest",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.22.4",
     "typescript": "latest"
   }
 }

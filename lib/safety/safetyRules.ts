@@ -8,22 +8,28 @@ const patterns: Array<{
   terms: RegExp[];
 }> = [
   {
+    type: "missing_context",
+    severity: "blocked",
+    message: "Sema cannot follow instructions that attempt to bypass its safety boundaries.",
+    terms: [/\bignore (all )?(previous|safety|system|sema'?s safety) (rules|instructions|system)\b/i, /\bbypass (the )?(safety|guardrails|permission system)\b/i]
+  },
+  {
     type: "diagnosis_request",
     severity: "blocked",
     message: "Sema cannot diagnose or identify a medical condition.",
-    terms: [/\bdiagnos(e|is)\b/i, /\bwhat do i have\b/i, /\bwhat'?s wrong with me\b/i]
+    terms: [/\bdiagnos(e|is)\b/i, /\bwhat do i have\b/i, /\bwhat'?s wrong with me\b/i, /\b(is|does) (this|it) (mean|sound like) .*(broken|fracture|sprain|disease|condition)\b/i, /\bis my .* (broken|fractured|sprained)\b/i]
   },
   {
     type: "treatment_request",
     severity: "blocked",
     message: "Sema cannot recommend treatment, medication, dosing, or prescribing.",
-    terms: [/\btreat(ment)?\b/i, /\bmedicine\b/i, /\bmedication\b/i, /\bdose\b/i, /\bprescrib/i, /\bwhat should i take\b/i]
+    terms: [/\bhow (do|should|can) i treat\b/i, /\bwhat treatment\b/i, /\b(what|which) (medicine|medication) should i take\b/i, /\bhow much should i take\b/i, /\bwhat dose\b/i, /\bcan you prescribe\b/i, /\bwhat should i take\b/i]
   },
   {
     type: "triage_request",
     severity: "blocked",
     message: "Sema cannot determine urgency or whether emergency care is needed.",
-    terms: [/\bis this serious\b/i, /\bshould i go to (the )?(er|emergency room|urgent care)\b/i, /\bemergency\b/i]
+    terms: [/\bis this serious\b/i, /\b(should i go to|do i need) (the )?(er|emergency room|urgent care)\b/i, /\bemergency\b/i]
   },
   {
     type: "safe_unsafe_request",
@@ -41,7 +47,7 @@ const patterns: Array<{
     type: "audio_classification_request",
     severity: "blocked",
     message: "Sema cannot classify audio as a disease or screen for a condition.",
-    terms: [/\bcough sound/i, /\bsound like (pneumonia|covid|asthma|bronchitis)\b/i, /\bclassify.*audio\b/i]
+    terms: [/\bcough.*sound/i, /\bwhat disease.*(cough|audio|recording)\b/i, /\bsound like (pneumonia|covid|asthma|bronchitis)\b/i, /\bclassify.*audio\b/i]
   },
   {
     type: "body_map_overinterpretation",
