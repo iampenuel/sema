@@ -17,6 +17,8 @@ import type { SafetyFlag, SemaSession } from "@/lib/sema-session/types";
 import { AgentInput } from "./AgentInput";
 import { AgentMessageList } from "./AgentMessageList";
 import { AgentPermissionPrompt } from "./AgentPermissionPrompt";
+import { LiveAgentControls } from "@/components/live/LiveAgentControls";
+import type { SemaLiveController } from "@/hooks/useSemaLiveSession";
 
 const starterPrompts = [
   "Summarize my session so far.",
@@ -32,11 +34,13 @@ export function SemaAgentPanel({
   session,
   onExecuteAction,
   onSafetyFlags,
+  live,
   rail = false
 }: {
   session: SemaSession;
   onExecuteAction: (action: AgentAction) => string;
   onSafetyFlags?: (flags: SafetyFlag[]) => void;
+  live?: SemaLiveController;
   rail?: boolean;
 }) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -135,6 +139,8 @@ export function SemaAgentPanel({
         <StatusChip icon={ShieldCheck} label="Not a diagnosis" />
         <AIStatusBadge requestFailed={requestFailed} />
       </div>
+
+      {live ? <LiveAgentControls live={live} /> : null}
 
       <div className="mt-3 rounded-md border border-[#bdd5e5] bg-sema-pale/75 p-3 text-sm text-ink">
         <p className="flex items-center gap-2 font-semibold">

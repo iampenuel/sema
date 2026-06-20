@@ -91,8 +91,21 @@ export function useAgentActions(handlers: Handlers) {
         handlers.dispatch({ type: "approve_draft_capture", id });
         return "The reviewed draft was saved to the session.";
       }
-      case "readPacketSection":
-        return session.packetDraft ? "The packet draft is available in the preview below." : "No packet draft has been prepared yet.";
+      case "readPacketSection": {
+        const packet = session.packetDraft;
+        if (!packet) return "No packet draft has been prepared yet.";
+        switch (action.payload?.section) {
+          case "patient_words": return packet.patientWords || "No patient words are included yet.";
+          case "summary": return packet.aiOrganizedSummary?.summaryNote || "No approved organized summary is included yet.";
+          case "timeline": return packet.aiOrganizedSummary?.timeline.map((item) => `${item.label}: ${item.detail}`).join(" ") || "No timeline items are included yet.";
+          case "body_observations": return packet.bodyLocationObservations.length ? `${packet.bodyLocationObservations.length} body/location observations are included.` : "No body/location observations are included yet.";
+          case "audio_observations": return packet.audioSignals.length ? `${packet.audioSignals.length} audio observations are included. Sema does not classify audio.` : "No audio observations are included yet.";
+          case "missing_details": return packet.missingDetails.length ? packet.missingDetails.join(" ") : "No missing details are currently listed.";
+          case "clinician_questions": return packet.clinicianQuestions.length ? packet.clinicianQuestions.join(" ") : "No clinician questions are included yet.";
+          case "safety": return `${packet.safetyNote} ${packet.limitations.join(" ")}`;
+          default: return "The packet draft is available in the preview below.";
+        }
+      }
       case "exportPacketPdf":
         if (!session.packetDraft) return "Prepare a packet draft before exporting.";
         window.print();

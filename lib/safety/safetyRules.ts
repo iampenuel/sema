@@ -17,7 +17,7 @@ const patterns: Array<{
     type: "diagnosis_request",
     severity: "blocked",
     message: "Sema cannot diagnose or identify a medical condition.",
-    terms: [/\bdiagnos(e|is)\b/i, /\bwhat do i have\b/i, /\bwhat'?s wrong with me\b/i, /\b(is|does) (this|it) (mean|sound like) .*(broken|fracture|sprain|disease|condition)\b/i, /\bis my .* (broken|fractured|sprained)\b/i]
+    terms: [/\bdiagnos(e|is)\b/i, /\bwhat (disease|condition|illness) do i have\b/i, /\bwhat do i have\b/i, /\bwhat'?s wrong with me\b/i, /\b(is|does) (this|it) (mean|sound like) .*(broken|fracture|sprain|disease|condition)\b/i, /\bis my .* (broken|fractured|sprained)\b/i]
   },
   {
     type: "treatment_request",

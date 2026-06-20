@@ -14,6 +14,7 @@ import { evaluatePermission } from "@/lib/agent/permissionGate";
 import { useAgentActions } from "@/hooks/useAgentActions";
 import { useSemaSession } from "@/hooks/useSemaSession";
 import { useVoiceCapture } from "@/hooks/useVoiceCapture";
+import { useSemaLiveSession } from "@/hooks/useSemaLiveSession";
 import { buildApprovedSessionContent, fingerprintApprovedSessionContent } from "@/lib/packet/approvedContent";
 import { createPacketReviewDraft } from "@/lib/packet/reviewDraft";
 import { ConcernTypeSelector } from "./ConcernTypeSelector";
@@ -82,6 +83,7 @@ export function SessionWorkspace() {
     onNavigate: (folder) => openFolder(folder),
     onVoiceAction: handleVoiceAgentAction
   });
+  const live = useSemaLiveSession({ session, executeAction: agentActions.execute, onSafetyFlags: (flags) => dispatch({ type: "add_safety_flags", flags }) });
 
   function openFolder(folder: SignalFolderId, scroll = true) {
     if (voicePanelTarget && folder !== voicePanelTarget) {
@@ -227,7 +229,7 @@ export function SessionWorkspace() {
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
         <aside className="no-print hidden lg:sticky lg:top-20 lg:block" aria-label="Sema agent rail">
-          <SemaAgentPanel session={session} onExecuteAction={agentActions.execute} onSafetyFlags={(flags) => dispatch({ type: "add_safety_flags", flags })} rail />
+          <SemaAgentPanel session={session} onExecuteAction={agentActions.execute} onSafetyFlags={(flags) => dispatch({ type: "add_safety_flags", flags })} live={live} rail />
         </aside>
 
         <div className="min-w-0 space-y-6">
@@ -328,7 +330,7 @@ export function SessionWorkspace() {
                   <X className="h-5 w-5" aria-hidden="true" />
                 </button>
               </div>
-              <SemaAgentPanel session={session} onExecuteAction={agentActions.execute} onSafetyFlags={(flags) => dispatch({ type: "add_safety_flags", flags })} />
+              <SemaAgentPanel session={session} onExecuteAction={agentActions.execute} onSafetyFlags={(flags) => dispatch({ type: "add_safety_flags", flags })} live={live} />
             </div>
           </div>
         )}
