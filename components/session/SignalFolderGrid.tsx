@@ -8,7 +8,7 @@ export type { SignalFolderId } from "@/lib/sema-session/types";
 const folderDefinitions = [
   { id: "story" as const, icon: MessageSquareText, title: "Story Signal Folder", description: "Capture what happened in your own words." },
   { id: "body_location" as const, icon: MapPinned, title: "Body/Location Signal Folder", description: "Mark where you noticed a symptom or limitation." },
-  { id: "audio" as const, icon: AudioLines, title: "Audio Signal Folder", description: "Record or simulate an audio observation." },
+  { id: "audio" as const, icon: AudioLines, title: "Audio Signal Folder", description: "Record browser-local audio or add a manual observation." },
   { id: "motion_visual" as const, icon: Camera, title: "Motion/Visual Signal Folder", description: "Add movement or visual notes. Camera capture is planned later." }
 ];
 

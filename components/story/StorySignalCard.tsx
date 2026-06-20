@@ -1,11 +1,13 @@
 "use client";
 
-import { FileText, Loader2, Sparkles, X } from "lucide-react";
+import { FileText, Loader2, Mic, Sparkles, X } from "lucide-react";
 import { AIFallbackNotice } from "@/components/ai/AIFallbackNotice";
 import { AIErrorNotice } from "@/components/ai/AIErrorNotice";
 import { SafetyBanner } from "@/components/layout/SafetyBanner";
 import { StructuredSummaryCard } from "./StructuredSummaryCard";
 import type { SemaSession, StructuredSummary } from "@/lib/sema-session/types";
+import { VoiceCapturePanel } from "@/components/voice/VoiceCapturePanel";
+import type { VoiceCaptureController } from "@/hooks/useVoiceCapture";
 
 export function StorySignalCard({
   session,
@@ -17,7 +19,13 @@ export function StorySignalCard({
   organizing = false,
   onCancelOrganizing,
   aiFallbackNotice,
-  aiError
+  aiError,
+  capture,
+  voiceOpen,
+  onOpenVoice,
+  onCloseVoice,
+  onSaveVoiceStory,
+  onSaveVoiceAudio
 }: {
   session: SemaSession;
   onStoryChange: (text: string) => void;
@@ -29,6 +37,12 @@ export function StorySignalCard({
   onCancelOrganizing?: () => void;
   aiFallbackNotice?: string | null;
   aiError?: string | null;
+  capture: VoiceCaptureController;
+  voiceOpen: boolean;
+  onOpenVoice: () => void;
+  onCloseVoice: () => void;
+  onSaveVoiceStory: (text: string, mode: "append" | "replace") => boolean;
+  onSaveVoiceAudio: (signal: import("@/lib/sema-session/types").AudioSignal) => boolean;
 }) {
   return (
     <section className="rounded-lg border border-sema-border bg-white p-5 shadow-card" aria-labelledby="story-title">
@@ -67,7 +81,9 @@ export function StorySignalCard({
           {organizing ? "Organizing..." : "Generate organized summary"}
         </button>
         {organizing && onCancelOrganizing ? <button type="button" onClick={onCancelOrganizing} className="inline-flex items-center gap-2 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-slate"><X className="h-4 w-4" aria-hidden="true" />Cancel</button> : null}
+        {!voiceOpen ? <button type="button" onClick={onOpenVoice} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-blue-dark"><Mic className="h-4 w-4" aria-hidden="true" />Dictate story</button> : null}
       </div>
+      {voiceOpen ? <VoiceCapturePanel capture={capture} hasExistingStory={Boolean(session.story.rawText.trim())} onSaveStory={onSaveVoiceStory} onSaveAudio={onSaveVoiceAudio} onClose={onCloseVoice} /> : null}
       {organizing ? <p className="mt-3 text-xs font-medium text-sema-slate">Sema is organizing only the information you provided.</p> : null}
       {aiFallbackNotice ? <div className="mt-3"><AIFallbackNotice message={aiFallbackNotice} /></div> : null}
       {aiError ? <div className="mt-3"><AIErrorNotice message={aiError} /></div> : null}

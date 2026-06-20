@@ -30,6 +30,22 @@ export function evaluatePermission(action: AgentAction): PermissionDecision {
       cancelLabel: "Cancel"
     };
   }
+  if (action.type === "requestMicrophonePermission" || action.type === "startVoiceCapture") {
+    return {
+      outcome: "permission_required",
+      message: "I can open the browser-local recording panel. Microphone access and recording begin only after you use the controls there. Nothing is uploaded during this phase. Continue?",
+      confirmLabel: "Open voice controls",
+      cancelLabel: "Cancel"
+    };
+  }
+  if (action.type === "saveVoiceDraftToFolder") {
+    return {
+      outcome: "permission_required",
+      message: "I can open the voice draft for review. Nothing is saved until you review the transcript and confirm its target folder.",
+      confirmLabel: "Review draft",
+      cancelLabel: "Cancel"
+    };
+  }
   if (action.riskLevel === "high_impact") {
     return {
       outcome: "explicit_confirmation_required",

@@ -16,6 +16,7 @@ export type SemaSessionAction =
   | { type: "set_concern_type"; concernType: ConcernType }
   | { type: "open_folder"; folder: SignalFolderId }
   | { type: "update_story_raw_text"; rawText: string }
+  | { type: "apply_voice_story_text"; transcript: string; mode: "append" | "replace" }
   | { type: "save_story" }
   | { type: "set_structured_summary"; summary: StructuredSummary; draft?: DraftCapture }
   | { type: "update_structured_summary"; summary: StructuredSummary }
@@ -69,6 +70,21 @@ export function semaSessionReducer(session: SemaSession, action: SemaSessionActi
         packetNarrativeDraft: undefined
       };
       return touch(withFolderStatus(next, "story", action.rawText.trim() ? (hasSummary ? "needs_review" : "in_progress") : "empty"));
+    }
+    case "apply_voice_story_text": {
+      const transcript = action.transcript.trim();
+      if (!transcript) return session;
+      const rawText = action.mode === "append" && session.story.rawText.trim()
+        ? `${session.story.rawText.trim()}\n\n${transcript}`
+        : transcript;
+      const next = {
+        ...session,
+        story: { rawText },
+        draftCaptures: session.draftCaptures.map((draft) => draft.targetFolder === "story" && draft.status === "needs_review" ? { ...draft, status: "discarded" as const } : draft),
+        packetDraft: undefined,
+        packetNarrativeDraft: undefined
+      };
+      return touch(withFolderStatus(next, "story", "saved"));
     }
     case "save_story":
       return touch(withFolderStatus(session, "story", session.story.rawText.trim() ? (session.story.summaryStatus === "needs_review" ? "needs_review" : "saved") : "empty"));

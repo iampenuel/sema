@@ -12,12 +12,27 @@ function openFolderResponse(folder: SignalFolderId, label: string): AgentRespons
   };
 }
 
+export function routeLocalVoiceIntent(message: string): AgentResponse | null {
+  const lower = message.toLowerCase().trim().replace(/[.!?]+$/, "");
+  if (["start recording", "record an audio signal", "record audio", "take voice notes"].includes(lower)) {
+    return { reply: "I can open the recording panel. Microphone access and recording start only after you confirm and use its controls.", proposedActions: [createAgentAction("startVoiceCapture", { target: "audio" })], safetyFlags: [] };
+  }
+  if (lower === "stop recording") return { reply: "I can stop the active browser-local recording and move it to review.", proposedActions: [createAgentAction("stopVoiceCapture")], safetyFlags: [] };
+  if (lower === "cancel recording") return { reply: "I can cancel the active recording without adding it to the session.", proposedActions: [createAgentAction("cancelVoiceCapture")], safetyFlags: [] };
+  if (lower === "review my recording") return { reply: "I can open the local recording draft for review.", proposedActions: [createAgentAction("openVoiceDraftReview")], safetyFlags: [] };
+  if (lower === "save this to my story") return { reply: "I can open the draft with Story selected. You will review and approve it before anything is saved.", proposedActions: [createAgentAction("saveVoiceDraftToFolder", { target: "story" })], safetyFlags: [] };
+  if (lower === "save this to the audio folder") return { reply: "I can open the draft with Audio selected. You will review and approve it before anything is saved.", proposedActions: [createAgentAction("saveVoiceDraftToFolder", { target: "audio" })], safetyFlags: [] };
+  return null;
+}
+
 export function routeLocalIntent(message: string, session: SemaSession, currentRoute: string): AgentResponse {
   const safetyFlags = detectUnsafeRequest(message);
   if (safetyFlags.length) return { reply: getSafeRedirect(safetyFlags), proposedActions: [], safetyFlags, blocked: true };
 
   const lower = message.toLowerCase().trim();
   const context = buildAgentContext(session, currentRoute);
+  const voice = routeLocalVoiceIntent(message);
+  if (voice) return voice;
 
   const readMatch = lower.match(/read (?:the )?(story|body(?: map)?|audio|motion|visual|packet)(?: folder| section)?/);
   if (readMatch) {

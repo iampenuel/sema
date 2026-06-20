@@ -1,6 +1,6 @@
 import { getMissingDetails } from "@/lib/sema-session/selectors";
 import type { SemaSession } from "@/lib/sema-session/types";
-import { AGENT_ACTION_REGISTRY } from "./actionRegistry";
+import { MODEL_CALLABLE_AGENT_ACTIONS } from "./actionRegistry";
 import type { AgentContextSnapshot } from "./agentTypes";
 
 export function buildAgentContext(session: SemaSession, currentRoute: string): AgentContextSnapshot {
@@ -18,6 +18,6 @@ export function buildAgentContext(session: SemaSession, currentRoute: string): A
     hasPacketDraft: Boolean(session.packetDraft),
     missingDetails: getMissingDetails(session),
     safetyFlags: session.safetyFlags,
-    availableActions: Object.keys(AGENT_ACTION_REGISTRY) as AgentContextSnapshot["availableActions"]
+    availableActions: MODEL_CALLABLE_AGENT_ACTIONS
   };
 }

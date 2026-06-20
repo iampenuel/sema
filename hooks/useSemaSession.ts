@@ -5,6 +5,7 @@ import { DEMO_AUDIO_SIGNAL, DEMO_BODY_OBSERVATION, DEMO_CONCERN_TYPE, DEMO_STORY
 import { buildEvidencePacket, generateStructuredSummary } from "@/lib/packet/buildPacket";
 import { createEmptySession } from "@/lib/sema-session/defaults";
 import { semaSessionReducer } from "@/lib/sema-session/reducer";
+import { sanitizeAudioSignal, serializeSemaSession, toPacketAudioSignal } from "@/lib/voice/audioMetadata";
 import type {
   AudioSignal,
   BodyMapObservation,
@@ -40,7 +41,7 @@ function draftForSummary(summary: StructuredSummary, source: DraftCapture["sourc
   };
 }
 
-function migrateSession(parsed: StoredSession): SemaSession {
+export function migrateSession(parsed: StoredSession): SemaSession {
   const base = createEmptySession();
   const bodyLocation = parsed.bodyLocation ?? parsed.bodyMap ?? [];
   const motionVisualNotes = (parsed.motionVisualNotes ?? []).map((item, index) =>
@@ -60,7 +61,7 @@ function migrateSession(parsed: StoredSession): SemaSession {
   const packetDraft = storedPacket?.id ? {
     ...storedPacket,
     bodyLocationObservations: storedPacket.bodyLocationObservations ?? storedPacket.bodyMapObservations ?? [],
-    audioSignals: (storedPacket.audioSignals ?? []).map(({ id, name, durationSeconds, tags, notes, createdAt, source }) => ({ id, name, durationSeconds, tags, notes, createdAt, source })),
+    audioSignals: (storedPacket.audioSignals ?? []).map((signal, index) => toPacketAudioSignal(sanitizeAudioSignal(signal, index))),
     motionVisualNotes: storedPacket.motionVisualNotes ?? [],
     missingDetails: storedPacket.missingDetails ?? storedPacket.aiOrganizedSummary?.missingDetails ?? [],
     clinicianQuestions: storedPacket.clinicianQuestions ?? storedPacket.aiOrganizedSummary?.clinicianQuestions ?? [],
@@ -81,6 +82,7 @@ function migrateSession(parsed: StoredSession): SemaSession {
       summaryStatus: parsed.story?.summaryStatus ?? (summary ? "approved" : undefined)
     },
     bodyLocation,
+    audioSignals: (parsed.audioSignals ?? []).map((signal, index) => sanitizeAudioSignal(signal, index)),
     motionVisualNotes,
     packetDraft,
     packetNarrativeDraft: parsed.packetNarrativeDraft?.contentFingerprint ? parsed.packetNarrativeDraft : undefined,
@@ -117,7 +119,7 @@ export function useSemaSession() {
   }, []);
 
   useEffect(() => {
-    if (hydratedRef.current) window.localStorage.setItem(storageKey, JSON.stringify(session));
+    if (hydratedRef.current) window.localStorage.setItem(storageKey, serializeSemaSession(session));
   }, [session]);
 
   return useMemo(
@@ -127,6 +129,7 @@ export function useSemaSession() {
       setConcernType: (concernType: ConcernType) => dispatch({ type: "set_concern_type", concernType }),
       openFolder: (folder: SignalFolderId) => dispatch({ type: "open_folder", folder }),
       updateStory: (rawText: string) => dispatch({ type: "update_story_raw_text", rawText }),
+      applyVoiceStoryText: (transcript: string, mode: "append" | "replace") => dispatch({ type: "apply_voice_story_text", transcript, mode }),
       saveStory: () => dispatch({ type: "save_story" }),
       generateSummary: () => {
         const summary = generateStructuredSummary(session.story.rawText);

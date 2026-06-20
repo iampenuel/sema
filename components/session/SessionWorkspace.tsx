@@ -13,12 +13,15 @@ import { AIClientError, draftPacketWithAI, extractStoryWithAI, storyDraftToSumma
 import { evaluatePermission } from "@/lib/agent/permissionGate";
 import { useAgentActions } from "@/hooks/useAgentActions";
 import { useSemaSession } from "@/hooks/useSemaSession";
+import { useVoiceCapture } from "@/hooks/useVoiceCapture";
 import { buildApprovedSessionContent, fingerprintApprovedSessionContent } from "@/lib/packet/approvedContent";
 import { createPacketReviewDraft } from "@/lib/packet/reviewDraft";
 import { ConcernTypeSelector } from "./ConcernTypeSelector";
 import { MotionVisualSignalFolder } from "./MotionVisualSignalFolder";
 import { ReviewBoard } from "./ReviewBoard";
 import { SignalFolderGrid, type SignalFolderId } from "./SignalFolderGrid";
+import type { AudioSignal } from "@/lib/sema-session/types";
+import type { VoiceTargetFolder } from "@/lib/voice/voiceTypes";
 
 const folderLabels: Record<SignalFolderId, string> = {
   story: "Story Signal Folder",
@@ -35,6 +38,7 @@ export function SessionWorkspace() {
     setConcernType,
     openFolder: setActiveFolder,
     updateStory,
+    applyVoiceStoryText,
     saveStory,
     generateSummary,
     setSummaryDraft,
@@ -54,6 +58,8 @@ export function SessionWorkspace() {
     loadDemo,
     clearSession
   } = useSemaSession();
+  const voiceCapture = useVoiceCapture();
+  const [voicePanelTarget, setVoicePanelTarget] = useState<VoiceTargetFolder | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
   const [storyOrganizing, setStoryOrganizing] = useState(false);
   const [storyFallbackNotice, setStoryFallbackNotice] = useState<string | null>(null);
@@ -73,12 +79,78 @@ export function SessionWorkspace() {
     activePanelRef,
     packetRef,
     getSession: () => session,
-    onNavigate: setActiveFolder
+    onNavigate: (folder) => openFolder(folder),
+    onVoiceAction: handleVoiceAgentAction
   });
 
   function openFolder(folder: SignalFolderId, scroll = true) {
+    if (voicePanelTarget && folder !== voicePanelTarget) {
+      const hasVoiceWork = Boolean(voiceCapture.state.audioBlob || voiceCapture.state.transcriptDraft.trim() || voiceCapture.state.elapsedSeconds);
+      if (hasVoiceWork && !window.confirm("Leave voice capture and delete the unsaved browser-local draft?")) return;
+      voiceCapture.cancel();
+      setVoicePanelTarget(null);
+    }
     setActiveFolder(folder);
     if (scroll) window.setTimeout(() => (folder === "packet" ? packetRef.current : activePanelRef.current)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function openVoicePanel(target: VoiceTargetFolder) {
+    voiceCapture.setTarget(target);
+    setVoicePanelTarget(target);
+  }
+
+  function closeVoicePanel() {
+    voiceCapture.reset();
+    setVoicePanelTarget(null);
+  }
+
+  function handleVoiceAgentAction(action: import("@/lib/agent/agentTypes").AgentAction) {
+    const requestedTarget = action.payload?.target === "story" ? "story" : "audio";
+    switch (action.type) {
+      case "requestMicrophonePermission":
+      case "startVoiceCapture":
+        setActiveFolder(requestedTarget);
+        openVoicePanel(requestedTarget);
+        return "Voice controls are open. Use Allow microphone and Start recording when you are ready; Sema cannot start the microphone for you.";
+      case "stopVoiceCapture":
+        voiceCapture.stop();
+        return voiceCapture.state.status === "recording" || voiceCapture.state.status === "paused" ? "Recording stopped. Your browser-local draft is moving to review." : "There is no active recording to stop.";
+      case "cancelVoiceCapture": {
+        const hasDraft = Boolean(voiceCapture.state.audioBlob || voiceCapture.state.transcriptDraft.trim() || voiceCapture.state.elapsedSeconds);
+        if (hasDraft && !window.confirm("Cancel this recording and delete the unsaved browser-local draft?")) return "The recording draft was kept.";
+        voiceCapture.cancel();
+        setVoicePanelTarget(null);
+        return "The browser-local recording was cancelled. Nothing was added to the session.";
+      }
+      case "openVoiceDraftReview":
+        setActiveFolder(voiceCapture.state.targetFolder);
+        setVoicePanelTarget(voiceCapture.state.targetFolder);
+        return voiceCapture.state.status === "reviewing" ? "The voice draft is open for review." : "There is no completed voice draft yet. The recording controls are open.";
+      case "saveVoiceDraftToFolder":
+        voiceCapture.setTarget(requestedTarget);
+        setActiveFolder(requestedTarget);
+        setVoicePanelTarget(requestedTarget);
+        return "The voice review is open with the requested folder selected. Review the text and use the approval control before saving.";
+      case "discardVoiceDraft":
+        voiceCapture.cancel();
+        setVoicePanelTarget(null);
+        return "The unsaved voice draft was discarded.";
+      default:
+        return "Voice controls are ready.";
+    }
+  }
+
+  function saveVoiceToStory(transcript: string, mode: "append" | "replace") {
+    const action = mode === "replace" ? "replace the existing story" : "append this reviewed text to the story";
+    if (!window.confirm(`Save the reviewed voice transcript and ${action}? Existing summaries and packet drafts will be cleared because the story changed.`)) return false;
+    applyVoiceStoryText(transcript, mode);
+    return true;
+  }
+
+  function saveVoiceToAudio(signal: AudioSignal) {
+    if (!window.confirm("Save this reviewed transcript and recording metadata to the Audio Signal Folder? Raw audio will not be stored in the session.")) return false;
+    addAudioSignal(signal);
+    return true;
   }
 
   function confirmClearSession() {
@@ -198,7 +270,7 @@ export function SessionWorkspace() {
 
             {session.activeFolder === "story" && (
               <div ref={storyRef}>
-                <StorySignalCard session={session} onStoryChange={updateStory} onSaveStory={saveStory} onGenerateSummary={requestGenerateSummary} onLoadDemo={loadDemo} onSummaryChange={updateStructuredSummary} organizing={storyOrganizing} onCancelOrganizing={() => storyAbortRef.current?.abort()} aiFallbackNotice={storyFallbackNotice} aiError={storyAIError} />
+                <StorySignalCard session={session} onStoryChange={updateStory} onSaveStory={saveStory} onGenerateSummary={requestGenerateSummary} onLoadDemo={loadDemo} onSummaryChange={updateStructuredSummary} organizing={storyOrganizing} onCancelOrganizing={() => storyAbortRef.current?.abort()} aiFallbackNotice={storyFallbackNotice} aiError={storyAIError} capture={voiceCapture} voiceOpen={voicePanelTarget === "story"} onOpenVoice={() => openVoicePanel("story")} onCloseVoice={closeVoicePanel} onSaveVoiceStory={saveVoiceToStory} onSaveVoiceAudio={saveVoiceToAudio} />
                 <FolderContinue onClick={() => openFolder("body_location")} label="Save and continue to Body/Location Signal" />
               </div>
             )}
@@ -210,7 +282,7 @@ export function SessionWorkspace() {
             )}
             {session.activeFolder === "audio" && (
               <div ref={audioRef}>
-                <AudioSignalCard session={session} onAdd={addAudioSignal} onRemove={removeAudioSignal} />
+                <AudioSignalCard session={session} onAdd={addAudioSignal} onRemove={removeAudioSignal} capture={voiceCapture} voiceOpen={voicePanelTarget === "audio"} onOpenVoice={() => openVoicePanel("audio")} onCloseVoice={closeVoicePanel} onSaveVoiceStory={saveVoiceToStory} onSaveVoiceAudio={saveVoiceToAudio} />
                 <FolderContinue onClick={() => openFolder("motion_visual")} label="Continue to optional Motion/Visual Signal" />
               </div>
             )}

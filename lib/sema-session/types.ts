@@ -51,15 +51,16 @@ export type AudioSignal = {
   id: string;
   name: string;
   durationSeconds: number;
-  objectUrl?: string;
+  mimeType?: string;
   tags: string[];
   notes?: string;
-  waveformPeaks?: number[];
+  transcript?: string;
+  transcriptSource?: "browser_transcribed_user_reviewed";
   createdAt: string;
-  source: "patient_recorded" | "demo_simulated";
+  source: "browser_voice_capture" | "patient_recorded" | "demo_simulated" | "manual_note";
 };
 
-export type PacketAudioSignal = Pick<AudioSignal, "id" | "name" | "durationSeconds" | "tags" | "notes" | "createdAt" | "source">;
+export type PacketAudioSignal = Pick<AudioSignal, "id" | "name" | "durationSeconds" | "mimeType" | "tags" | "notes" | "transcript" | "transcriptSource" | "createdAt" | "source">;
 
 export type MotionVisualNote = {
   id: string;

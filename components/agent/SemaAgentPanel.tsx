@@ -6,7 +6,7 @@ import { CircleCheck, Keyboard, Loader2, ShieldCheck, Sparkles } from "lucide-re
 import { AIFallbackNotice } from "@/components/ai/AIFallbackNotice";
 import { AIStatusBadge } from "@/components/ai/AIStatusBadge";
 import { buildAgentContext } from "@/lib/agent/buildAgentContext";
-import { routeLocalIntent } from "@/lib/agent/localIntentRouter";
+import { routeLocalIntent, routeLocalVoiceIntent } from "@/lib/agent/localIntentRouter";
 import { requestAgentProposal } from "@/lib/ai/client";
 import { routeExactAgentIntent } from "@/lib/ai/localAgentIntent";
 import { validateAgentProposal } from "@/lib/ai/validators/validateAgentProposal";
@@ -76,6 +76,12 @@ export function SemaAgentPanel({
     }
 
     const context = buildAgentContext(session, "/session");
+    const voiceIntent = routeLocalVoiceIntent(message);
+    if (voiceIntent) {
+      addMessage("agent", voiceIntent.reply);
+      voiceIntent.proposedActions.forEach(handleAction);
+      return;
+    }
     const exact = routeExactAgentIntent(message, context);
     if (exact) {
       const validated = validateAgentProposal(exact);

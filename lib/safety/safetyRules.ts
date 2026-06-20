@@ -47,7 +47,16 @@ const patterns: Array<{
     type: "audio_classification_request",
     severity: "blocked",
     message: "Sema cannot classify audio as a disease or screen for a condition.",
-    terms: [/\bcough.*sound/i, /\bwhat disease.*(cough|audio|recording)\b/i, /\bsound like (pneumonia|covid|asthma|bronchitis)\b/i, /\bclassify.*audio\b/i]
+    terms: [
+      /\bcough.*sound/i,
+      /\bwhat does (this|the) cough mean\b/i,
+      /\b(recording|audio|cough).*(sound|seem) serious\b/i,
+      /\bwhat disease.*(cough|audio|recording|this)\b/i,
+      /\bcan you tell what disease this is\b/i,
+      /\bsound like (pneumonia|covid|asthma|bronchitis)\b/i,
+      /\bclassify.*audio\b/i,
+      /\bis (this|the (audio|recording|cough)) normal\b/i
+    ]
   },
   {
     type: "body_map_overinterpretation",

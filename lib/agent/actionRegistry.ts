@@ -17,8 +17,22 @@ export const AGENT_ACTION_REGISTRY: Record<AgentActionType, ActionMeta> = {
   clearSession: { label: "Clear session", description: "Clear the current session from this browser.", riskLevel: "high_impact", requiresPermission: true },
   deleteAudio: { label: "Delete audio", description: "Delete a saved audio observation.", riskLevel: "high_impact", requiresPermission: true },
   sharePacket: { label: "Share packet", description: "Share the evidence packet outside this browser.", riskLevel: "high_impact", requiresPermission: true },
+  requestMicrophonePermission: { label: "Open microphone access", description: "Open the browser-local voice panel so the user can choose whether to allow microphone access.", riskLevel: "write", requiresPermission: true },
+  startVoiceCapture: { label: "Open voice capture", description: "Open browser-local voice controls. Recording still starts only from a user button.", riskLevel: "write", requiresPermission: true },
+  stopVoiceCapture: { label: "Stop recording", description: "Stop the active browser-local recording and open review.", riskLevel: "navigation", requiresPermission: false },
+  cancelVoiceCapture: { label: "Cancel recording", description: "Cancel active browser-local recording without saving.", riskLevel: "navigation", requiresPermission: false },
+  openVoiceDraftReview: { label: "Review voice draft", description: "Open the current browser-local voice draft for review.", riskLevel: "navigation", requiresPermission: false },
+  saveVoiceDraftToFolder: { label: "Review voice draft for saving", description: "Open the voice review and target folder controls. The user must approve the save in the panel.", riskLevel: "write", requiresPermission: true },
+  discardVoiceDraft: { label: "Discard voice draft", description: "Delete the current unsaved voice draft.", riskLevel: "high_impact", requiresPermission: true },
   blockedSafetyResponse: { label: "Blocked safety request", description: "Do not execute a request that crosses Sema's safety boundary.", riskLevel: "blocked", requiresPermission: false }
 };
+
+// Device-access actions are intentionally absent. Model proposals cannot activate the microphone.
+export const MODEL_CALLABLE_AGENT_ACTIONS: AgentActionType[] = [
+  "openSignalFolder", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails",
+  "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder",
+  "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket"
+];
 
 let actionSequence = 0;
 

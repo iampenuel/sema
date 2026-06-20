@@ -1,6 +1,7 @@
 import type { EvidencePacket, SemaSession, StructuredSummary, TimelineItem } from "@/lib/sema-session/types";
 import { fingerprintSessionPacketSource } from "@/lib/packet/approvedContent";
 import { PACKET_LIMITATIONS, PACKET_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
+import { toPacketAudioSignal } from "@/lib/voice/audioMetadata";
 
 const missing = "Missing from current patient-provided information.";
 
@@ -106,7 +107,7 @@ export function buildEvidencePacket(session: SemaSession, options: PacketBuildOp
     patientWords: session.story.rawText,
     aiOrganizedSummary: approvedSummary,
     bodyLocationObservations: session.bodyLocation,
-    audioSignals: session.audioSignals.map(({ id, name, durationSeconds, tags, notes, createdAt, source }) => ({ id, name, durationSeconds, tags, notes, createdAt, source })),
+    audioSignals: session.audioSignals.map(toPacketAudioSignal),
     motionVisualNotes: session.motionVisualNotes,
     missingDetails: Array.from(new Set([...(approvedSummary?.missingDetails ?? []), ...(approvedNarrative?.missingDetails ?? [])])),
     clinicianQuestions: Array.from(new Set([...(approvedSummary?.clinicianQuestions ?? []), ...(approvedNarrative?.clinicianQuestions ?? [])])),

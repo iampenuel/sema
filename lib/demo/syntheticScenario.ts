@@ -18,9 +18,9 @@ export const DEMO_AUDIO_SIGNAL: AudioSignal = {
   id: "demo-audio-description",
   name: "Demo voice note placeholder",
   durationSeconds: 18,
-  tags: ["after exercise", "comes and goes"],
+  tags: ["voice note", "context noted"],
   notes: "Simulated note: patient describes wrist pain when moving the hand backward.",
-  waveformPeaks: [24, 36, 18, 46, 52, 29, 41, 34, 55, 37, 22, 44],
+  transcript: "Synthetic demo voice note about wrist discomfort with movement.",
   createdAt: new Date().toISOString(),
   source: "demo_simulated"
 };

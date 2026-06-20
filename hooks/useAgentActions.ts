@@ -15,6 +15,7 @@ type Handlers = {
   packetRef: RefObject<HTMLElement | null>;
   getSession: () => SemaSession;
   onNavigate: (folder: SignalFolderId) => void;
+  onVoiceAction?: (action: AgentAction) => string;
 };
 
 function summaryDraft(content: unknown): DraftCapture {
@@ -108,6 +109,14 @@ export function useAgentActions(handlers: Handlers) {
       }
       case "sharePacket":
         return "Sharing is not connected in this local phase. The packet remains in this browser.";
+      case "requestMicrophonePermission":
+      case "startVoiceCapture":
+      case "stopVoiceCapture":
+      case "cancelVoiceCapture":
+      case "openVoiceDraftReview":
+      case "saveVoiceDraftToFolder":
+      case "discardVoiceDraft":
+        return handlers.onVoiceAction?.(action) ?? "Voice controls are unavailable on this page.";
       case "blockedSafetyResponse":
         return "This request is blocked by Sema's safety boundary.";
       default:

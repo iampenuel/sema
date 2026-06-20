@@ -15,6 +15,13 @@ export type AgentActionType =
   | "clearSession"
   | "deleteAudio"
   | "sharePacket"
+  | "requestMicrophonePermission"
+  | "startVoiceCapture"
+  | "stopVoiceCapture"
+  | "cancelVoiceCapture"
+  | "openVoiceDraftReview"
+  | "saveVoiceDraftToFolder"
+  | "discardVoiceDraft"
   | "blockedSafetyResponse";
 
 export type AgentActionRiskLevel = "read_only" | "navigation" | "write" | "high_impact" | "blocked";

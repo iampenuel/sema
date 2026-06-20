@@ -82,7 +82,7 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
           {packet.audioSignals.length ? (
             <ul className="space-y-2">
               {packet.audioSignals.map((signal) => (
-                <li key={signal.id}>{signal.name} · {signal.durationSeconds}s · {signal.tags.join(", ") || "No tags"}{signal.notes ? ` · ${signal.notes}` : ""}</li>
+                <li key={signal.id}>{signal.name} · {signal.durationSeconds}s · {signal.tags.join(", ") || "No tags"}{signal.notes ? ` · ${signal.notes}` : ""}{signal.transcript ? ` · Reviewed transcript: ${signal.transcript}` : ""}</li>
               ))}
             </ul>
           ) : (
