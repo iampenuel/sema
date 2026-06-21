@@ -24,6 +24,9 @@ import {
   type DiagnosticDependencies
 } from "../diagnostics/liveDiagnosticCore";
 import { CONSTRAINT_PROBE_LOCK_ADDITIONAL_FIELDS, LIVE_CONSTRAINT_FEATURES, buildTokenConstraintConfig, runConstraintProbes } from "../diagnostics/liveConstraintProbes";
+import { FakeRealLiveSmokeDriver } from "./fakeRealLiveSmokeDriver";
+import { createFinalResultReporter, exitCodeForSmokeResult, runRealLiveSmoke } from "../real-smoke/realLiveSmokeRunner";
+import type { RealLiveSmokeStage, RealLiveSmokeStageEvent } from "../real-smoke/realLiveSmokeTypes";
 
 let passed = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -290,6 +293,96 @@ await test("constraint probe list is ordered and has no hidden retries", async (
 });
 await test("provider operations have a bounded timeout", async () => {
   await assert.rejects(withDiagnosticTimeout(new Promise(() => {}), 1, "test operation"), /timed out/);
+});
+
+const smokeTimeouts = { operationMs: 5, tokenCreationMs: 5, socketOpenMs: 5, setupCompleteMs: 5, spokenOutputMs: 5, inputTranscriptMs: 5, outputTranscriptMs: 5, readToolCallMs: 5, postToolCompletionMs: 5, writeToolCallMs: 5, interruptionMs: 5, safetyResponseMs: 5, closeMs: 5, globalMs: 100 };
+const runFakeSmoke = (driver: FakeRealLiveSmokeDriver, onStage?: (event: RealLiveSmokeStageEvent) => void, timeouts = smokeTimeouts) => runRealLiveSmoke(driver, { timeouts, onStage });
+
+await test("real smoke success advances from token creation to socket", async () => {
+  const driver = new FakeRealLiveSmokeDriver();
+  const result = await runFakeSmoke(driver);
+  assert.equal(result.passed, true);
+  assert.ok(driver.calls.indexOf("creating_ephemeral_token") < driver.calls.indexOf("opening_constrained_socket"));
+});
+for (const [name, stage] of [
+  ["token creation", "creating_ephemeral_token"],
+  ["socket open", "opening_constrained_socket"],
+  ["setup", "awaiting_setup_complete"],
+  ["spoken output", "awaiting_spoken_output"],
+  ["input transcript", "awaiting_input_transcript"],
+  ["output transcript", "awaiting_output_transcript"],
+  ["read tool", "awaiting_read_tool_call"],
+  ["write tool", "awaiting_write_tool_call"],
+  ["interruption", "testing_interruption"],
+  ["safety response", "testing_safety_refusal"]
+] as Array<[string, RealLiveSmokeStage]>) {
+  await test(`real smoke ${name} timeout identifies its stage`, async () => {
+    const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: stage }));
+    assert.equal(result.failedStage, stage);
+    assert.equal(result.errorCode, "stage_timeout");
+    assert.equal(result.cleanupCompleted, true);
+  });
+}
+await test("real smoke global timeout identifies the latest stage", async () => {
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: "awaiting_spoken_output" }), undefined, { ...smokeTimeouts, spokenOutputMs: 100, globalMs: 2 });
+  assert.equal(result.failedStage, "awaiting_spoken_output");
+  assert.equal(result.errorCode, "global_timeout");
+});
+await test("every real smoke operation failure invokes cleanup", async () => {
+  const driver = new FakeRealLiveSmokeDriver({ failStage: "requesting_write_tool" });
+  const result = await runFakeSmoke(driver);
+  assert.equal(result.cleanupCompleted, true);
+  assert.equal(driver.cleanupCalls, 1);
+});
+await test("real smoke cleanup is idempotent", async () => {
+  const driver = new FakeRealLiveSmokeDriver();
+  await driver.cleanup();
+  const second = await driver.cleanup();
+  assert.equal(second.cleanupCompleted, true);
+  assert.equal(driver.cleanupCalls, 1);
+});
+await test("late socket events are ignored after cleanup", async () => {
+  const driver = new FakeRealLiveSmokeDriver(); await runFakeSmoke(driver); driver.emitLateSocketEvent(); assert.equal(driver.lateSocketMutations, 0);
+});
+await test("late audio chunks are ignored after cleanup", async () => {
+  const driver = new FakeRealLiveSmokeDriver(); await runFakeSmoke(driver); driver.emitLateAudio(); assert.equal(driver.lateAudioMutations, 0);
+});
+await test("late transcripts are ignored after cleanup", async () => {
+  const driver = new FakeRealLiveSmokeDriver(); await runFakeSmoke(driver); driver.emitLateTranscript(); assert.equal(driver.lateTranscriptMutations, 0);
+});
+await test("all real smoke stage timers are cleared", async () => assert.equal((await runFakeSmoke(new FakeRealLiveSmokeDriver())).timersCleared, true));
+await test("real smoke listeners are removed", async () => assert.equal((await runFakeSmoke(new FakeRealLiveSmokeDriver())).listenersRemoved, true));
+await test("real smoke socket close is bounded", async () => {
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: "closing_socket" }));
+  assert.equal(result.failedStage, "closing_socket");
+  assert.equal(result.cleanupCompleted, true);
+});
+await test("real smoke final JSON reporter emits exactly once", async () => {
+  const lines: string[] = [];
+  const report = createFinalResultReporter((line) => lines.push(line));
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver());
+  assert.equal(report(result), true); assert.equal(report(result), false); assert.equal(lines.length, 1);
+});
+await test("real smoke success is reported only after cleanup", async () => {
+  const events: RealLiveSmokeStageEvent[] = [];
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver(), (event) => events.push(event));
+  const cleanupPassed = events.findIndex((event) => event.stage === "cleaning_up" && event.status === "passed");
+  const completed = events.findIndex((event) => event.stage === "completed" && event.status === "passed");
+  assert.equal(result.passed, true); assert.ok(cleanupPassed >= 0 && completed > cleanupPassed);
+});
+await test("real smoke failure exits nonzero", async () => assert.equal(exitCodeForSmokeResult(await runFakeSmoke(new FakeRealLiveSmokeDriver({ failStage: "sending_setup" }))), 1));
+await test("real smoke success exits zero", async () => assert.equal(exitCodeForSmokeResult(await runFakeSmoke(new FakeRealLiveSmokeDriver())), 0));
+await test("real smoke fallback cannot count as success", async () => assert.equal((await runFakeSmoke(new FakeRealLiveSmokeDriver({ fallbackUsed: true }))).passed, false));
+await test("real smoke stage logs contain no key or token", async () => {
+  const events: RealLiveSmokeStageEvent[] = [];
+  await runFakeSmoke(new FakeRealLiveSmokeDriver(), (event) => events.push(event));
+  const output = JSON.stringify(events);
+  assert.equal(/AIza|auth_tokens\//.test(output), false);
+});
+await test("real smoke failures never log authenticated URLs", async () => {
+  const events: RealLiveSmokeStageEvent[] = [];
+  await runFakeSmoke(new FakeRealLiveSmokeDriver({ failStage: "opening_constrained_socket" }), (event) => events.push(event));
+  assert.equal(JSON.stringify(events).includes("access_token="), false);
 });
 
   process.stdout.write(`\n${passed} local Gemini Live architecture checks passed. No provider call was made.\n`);
