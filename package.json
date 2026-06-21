@@ -10,6 +10,8 @@
     "test:ai": "node --import tsx lib/ai/evals/runLocalEvals.ts",
     "test:voice": "node --import tsx lib/voice/evals/runVoiceEvals.ts",
     "test:live": "node --import tsx lib/live/evals/runLiveEvals.ts",
+    "test:live:diagnose": "node --import tsx lib/live/evals/runLiveDiagnostic.ts",
+    "test:live:constraints": "node --import tsx lib/live/evals/runLiveConstraintProbes.ts",
     "test:live:preflight": "node --import tsx lib/live/evals/runLivePreflight.ts",
     "test:live:real": "node --import tsx lib/live/evals/runRealLiveSmoke.ts",
     "test:ai:model": "node --import tsx lib/ai/evals/testModelPreflight.ts",

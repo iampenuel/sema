@@ -10,6 +10,20 @@ import { LiveTokenRateLimiter, safeTokenResponse } from "../liveTokenPolicy";
 import { buildLiveTokenTimes } from "../liveTokenPolicy";
 import { MockLiveProvider } from "../providers/mockLiveProvider";
 import type { LivePublicStatus } from "../liveTypes";
+import {
+  CONSTRAINED_LIVE_ENDPOINT,
+  CONSTRAINED_TOKEN_QUERY_PARAMETER,
+  DIRECT_LIVE_API_VERSION,
+  LiveDiagnosticFailure,
+  TOKEN_API_VERSION,
+  classifyDiagnosticFailure,
+  resolveTokenSetupSemantics,
+  runLiveDiagnosticLadder,
+  sanitizeDiagnosticText,
+  withDiagnosticTimeout,
+  type DiagnosticDependencies
+} from "../diagnostics/liveDiagnosticCore";
+import { LIVE_CONSTRAINT_FEATURES, runConstraintProbes } from "../diagnostics/liveConstraintProbes";
 
 let passed = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -163,6 +177,110 @@ await test("tool completion follows a success result", async () => {
   assert.equal(provider.results[0].result.message, "The page was read.");
 });
 await test("no camera or image tools are introduced", () => assert.equal(LIVE_TOOL_NAMES.some((name) => /camera|image|photo/i.test(name)), false));
+
+const diagnosticDependencies = (overrides: Partial<DiagnosticDependencies> = {}): DiagnosticDependencies => ({
+  model: "gemini-3.1-flash-live-preview",
+  hasApiKey: true,
+  checkModelVisibility: async () => ({ modelListed: true, modelNameMatched: true, inconclusive: false }),
+  connectDirect: async () => ({ socketOpened: true, setupAccepted: true }),
+  createMinimalToken: async () => ({ name: "auth_tokens/local-test", expiresAt: new Date(0).toISOString() }),
+  connectConstrained: async () => ({ socketOpened: true, setupAccepted: true }),
+  ...overrides
+});
+
+await test("diagnostic taxonomy does not collapse generic failures to model unavailable", () => {
+  assert.equal(classifyDiagnosticFailure(new Error("socket refused"), "direct_live_connection").code, "direct_live_connect_failed");
+});
+await test("inconclusive model listing continues to direct Live", async () => {
+  let directCalls = 0;
+  const report = await runLiveDiagnosticLadder(diagnosticDependencies({
+    checkModelVisibility: async () => ({ modelListed: false, modelNameMatched: false, inconclusive: true }),
+    connectDirect: async () => { directCalls += 1; return { socketOpened: true, setupAccepted: true }; }
+  }));
+  assert.equal(report.passed, true);
+  assert.equal(report.stages[0].listingStatus, "model_listing_inconclusive");
+  assert.equal(directCalls, 1);
+});
+await test("direct connection failure stops before token creation", async () => {
+  let tokenCalls = 0;
+  const report = await runLiveDiagnosticLadder(diagnosticDependencies({
+    connectDirect: async () => { throw new Error("socket refused"); },
+    createMinimalToken: async () => { tokenCalls += 1; return { name: "unused", expiresAt: "unused" }; }
+  }));
+  assert.equal(report.stages.at(-1)?.code, "direct_live_connect_failed");
+  assert.equal(tokenCalls, 0);
+});
+await test("direct setup rejection is distinct from connection failure", () => {
+  const failure = new LiveDiagnosticFailure("setup invalid", { socketOpened: true });
+  assert.equal(classifyDiagnosticFailure(failure, "direct_live_connection").code, "direct_live_setup_rejected");
+});
+await test("token failure stops before constrained socket", async () => {
+  let constrainedCalls = 0;
+  const report = await runLiveDiagnosticLadder(diagnosticDependencies({
+    createMinimalToken: async () => { throw new Error("token service rejected request"); },
+    connectConstrained: async () => { constrainedCalls += 1; return { socketOpened: true, setupAccepted: true }; }
+  }));
+  assert.equal(report.stages.at(-1)?.code, "token_create_failed");
+  assert.equal(constrainedCalls, 0);
+});
+await test("constrained socket failure is distinct from token failure", async () => {
+  const report = await runLiveDiagnosticLadder(diagnosticDependencies({ connectConstrained: async () => { throw new Error("socket refused"); } }));
+  assert.equal(report.stages.at(-1)?.code, "constrained_socket_failed");
+  assert.equal(report.stages.at(-1)?.tokenCreated, true);
+});
+await test("diagnostic redaction removes token names and permanent keys", () => {
+  const key = "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
+  const token = "auth_tokens/secret-token-value";
+  const safe = sanitizeDiagnosticText(`api_key=${key} token=${token}`, [key, token]);
+  assert.equal(safe.includes(key), false);
+  assert.equal(safe.includes(token), false);
+});
+await test("diagnostic redaction removes authenticated websocket URLs", () => {
+  const safe = sanitizeDiagnosticText(`${CONSTRAINED_LIVE_ENDPOINT}?access_token=auth_tokens/secret`);
+  assert.equal(safe.includes("access_token="), false);
+  assert.equal(safe.includes("generativelanguage.googleapis.com"), false);
+});
+await test("minimal token creation uses v1alpha", () => assert.equal(TOKEN_API_VERSION, "v1alpha"));
+await test("ephemeral transport uses constrained v1alpha endpoint", () => assert.match(CONSTRAINED_LIVE_ENDPOINT, /v1alpha\.GenerativeService\.BidiGenerateContentConstrained$/));
+await test("ephemeral transport uses access_token query parameter", () => assert.equal(CONSTRAINED_TOKEN_QUERY_PARAMETER, "access_token"));
+await test("permanent-key diagnostic uses normal server API version", () => assert.equal(DIRECT_LIVE_API_VERSION, "v1beta"));
+await test("empty token setup allows connection setup", () => assert.equal(resolveTokenSetupSemantics({ hasEmbeddedSetup: false }), "connection_supplies_setup"));
+await test("embedded token setup replaces connection setup", () => assert.equal(resolveTokenSetupSemantics({ hasEmbeddedSetup: true }), "token_replaces_setup"));
+await test("field mask represents selective token overrides", () => assert.equal(resolveTokenSetupSemantics({ hasEmbeddedSetup: true, fieldMask: ["config.responseModalities"] }), "field_mask_overrides_connection"));
+await test("voice rejection has a dedicated code", () => assert.equal(classifyDiagnosticFailure(new Error("invalid setup"), "constraint_probe", "voice_kore").code, "voice_config_rejected"));
+await test("thinking rejection has a dedicated code", () => assert.equal(classifyDiagnosticFailure(new Error("invalid setup"), "constraint_probe", "thinking_low").code, "thinking_config_rejected"));
+await test("tool rejection has a dedicated code", () => assert.equal(classifyDiagnosticFailure(new Error("invalid schema"), "constraint_probe", "one_read_only_tool").code, "tool_config_rejected"));
+await test("transcription rejection has a dedicated code", () => assert.equal(classifyDiagnosticFailure(new Error("invalid setup"), "constraint_probe", "input_transcription").code, "transcription_config_rejected"));
+await test("rate limiting stops later constraint probes", async () => {
+  let calls = 0;
+  const report = await runConstraintProbes("live", async () => {
+    calls += 1;
+    throw new Error("429 resource_exhausted");
+  });
+  assert.equal(report.results[0].code, "rate_limited");
+  assert.equal(calls, 1);
+});
+await test("timeout stops later constraint probes", async () => {
+  let calls = 0;
+  const report = await runConstraintProbes("live", async () => {
+    calls += 1;
+    throw new Error("deadline timed out");
+  });
+  assert.equal(report.results[0].code, "timeout");
+  assert.equal(calls, 1);
+});
+await test("constraint probe list is ordered and has no hidden retries", async () => {
+  const calls: string[] = [];
+  const report = await runConstraintProbes("live", async (feature) => {
+    calls.push(feature);
+    return { passed: true, tokenCreated: true, socketOpened: true, setupAccepted: true };
+  });
+  assert.equal(report.passed, true);
+  assert.deepEqual(calls, [...LIVE_CONSTRAINT_FEATURES]);
+});
+await test("provider operations have a bounded timeout", async () => {
+  await assert.rejects(withDiagnosticTimeout(new Promise(() => {}), 1, "test operation"), /timed out/);
+});
 
   process.stdout.write(`\n${passed} local Gemini Live architecture checks passed. No provider call was made.\n`);
 }
