@@ -1,3 +1,4 @@
+import { createDeterministicPcmFixture, validateSyntheticPcm } from "../real-smoke/syntheticPcm";
 import type { RealLiveSmokeCleanup, RealLiveSmokeConfiguration, RealLiveSmokeDriver, RealLiveSmokeStage } from "../real-smoke/realLiveSmokeTypes";
 
 export class FakeRealLiveSmokeDriver implements RealLiveSmokeDriver {
@@ -7,9 +8,15 @@ export class FakeRealLiveSmokeDriver implements RealLiveSmokeDriver {
   lateSocketMutations = 0;
   lateAudioMutations = 0;
   lateTranscriptMutations = 0;
+  syntheticPcm?: Buffer;
   cleanupResult: RealLiveSmokeCleanup = { socketClosed: true, audioStopped: true, timersCleared: true, listenersRemoved: true, cleanupCompleted: true };
 
-  constructor(private readonly options: { hangStage?: RealLiveSmokeStage; failStage?: RealLiveSmokeStage; fallbackUsed?: boolean } = {}) {}
+  constructor(private readonly options: {
+    hangStage?: RealLiveSmokeStage;
+    failStage?: RealLiveSmokeStage;
+    fallbackUsed?: boolean;
+    transcriptionReceived?: boolean;
+  } = {}) {}
 
   private async step(stage: RealLiveSmokeStage) {
     this.calls.push(stage);
@@ -17,36 +24,39 @@ export class FakeRealLiveSmokeDriver implements RealLiveSmokeDriver {
     if (this.options.hangStage === stage) await new Promise<void>(() => {});
   }
 
-  async initialize() { await this.step("initializing"); }
+  async initialize() { await this.step("initialization"); }
   async loadConfiguration(): Promise<RealLiveSmokeConfiguration> {
-    await this.step("loading_configuration");
+    await this.step("configuration");
     return { provider: "gemini_live", model: "gemini-3.1-flash-live-preview", voice: "Kore", fallbackUsed: (this.options.fallbackUsed ?? false) as false };
   }
+  async prepareSyntheticAudio() { await this.step("preparing_synthetic_audio"); this.syntheticPcm = createDeterministicPcmFixture(); }
+  async validateSyntheticAudio() { await this.step("validating_synthetic_audio"); if (!this.syntheticPcm) throw new Error("PCM missing"); return validateSyntheticPcm(this.syntheticPcm); }
   async createEphemeralToken() { await this.step("creating_ephemeral_token"); }
   async openConstrainedSocket() { await this.step("opening_constrained_socket"); }
-  async sendSetup() { await this.step("sending_setup"); }
-  async awaitSetupComplete() { await this.step("awaiting_setup_complete"); }
-  async sendSyntheticAudio() { await this.step("sending_synthetic_audio"); }
-  async awaitSpokenOutput() { await this.step("awaiting_spoken_output"); }
-  async awaitInputTranscript() { await this.step("awaiting_input_transcript"); }
-  async awaitOutputTranscript() { await this.step("awaiting_output_transcript"); }
-  async requestReadTool() { await this.step("requesting_read_tool"); }
-  async awaitReadToolCall() { await this.step("awaiting_read_tool_call"); }
-  async returnReadToolResult() { await this.step("returning_read_tool_result"); }
-  async awaitPostToolCompletion() { await this.step("awaiting_post_tool_completion"); }
-  async requestWriteTool() { await this.step("requesting_write_tool"); }
-  async awaitWriteToolCall() { await this.step("awaiting_write_tool_call"); }
-  async verifyPermissionState() { await this.step("verifying_permission_state"); }
-  async verifyNoEarlyExecution() { await this.step("verifying_no_early_execution"); }
+  async dispatchSetup() { await this.step("dispatching_setup"); }
+  async waitForSetupComplete() { await this.step("waiting_for_setup_complete"); }
+  async dispatchSyntheticAudio() { await this.step("dispatching_synthetic_audio"); }
+  async signalAudioEnd() { await this.step("signaling_audio_end"); }
+  async sendTextAudioResponseProbe() { await this.step("sending_text_audio_response_probe"); }
+  async waitForModelAudio() { await this.step("waiting_for_model_audio"); }
+  async validateModelAudio() { await this.step("validating_model_audio"); }
+  async validateTranscription() {
+    await this.step("validating_transcription");
+    return this.options.transcriptionReceived === false
+      ? { received: false }
+      : { received: true, characterCount: 14, safetyValid: true };
+  }
+  async testReadTool() { await this.step("testing_read_tool"); }
+  async testWritePermission() { await this.step("testing_write_permission"); }
   async testInterruption() { await this.step("testing_interruption"); }
-  async verifyQueueClear() { await this.step("verifying_queue_clear"); }
   async testSafetyRefusal() { await this.step("testing_safety_refusal"); }
-  async closeSocket() { await this.step("closing_socket"); this.closed = true; }
+  async closeSocket() { await this.step("closing_session"); this.closed = true; }
   async cleanup() {
     if (this.cleanupCalls) return this.cleanupResult;
-    await this.step("cleaning_up");
+    await this.step("cleanup");
     this.cleanupCalls += 1;
     this.closed = true;
+    this.syntheticPcm = undefined;
     return this.cleanupResult;
   }
 

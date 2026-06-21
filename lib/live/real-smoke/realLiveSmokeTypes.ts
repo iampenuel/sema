@@ -1,39 +1,60 @@
+import type { PcmValidationMetadata } from "./syntheticPcm";
+
 export type RealLiveSmokeStage =
-  | "initializing"
-  | "loading_configuration"
+  | "initialization"
+  | "configuration"
+  | "preparing_synthetic_audio"
+  | "validating_synthetic_audio"
   | "creating_ephemeral_token"
   | "opening_constrained_socket"
-  | "sending_setup"
-  | "awaiting_setup_complete"
-  | "sending_synthetic_audio"
-  | "awaiting_spoken_output"
-  | "awaiting_input_transcript"
-  | "awaiting_output_transcript"
-  | "requesting_read_tool"
-  | "awaiting_read_tool_call"
-  | "returning_read_tool_result"
-  | "awaiting_post_tool_completion"
-  | "requesting_write_tool"
-  | "awaiting_write_tool_call"
-  | "verifying_permission_state"
-  | "verifying_no_early_execution"
+  | "dispatching_setup"
+  | "waiting_for_setup_complete"
+  | "dispatching_synthetic_audio"
+  | "signaling_audio_end"
+  | "sending_text_audio_response_probe"
+  | "waiting_for_model_audio"
+  | "validating_model_audio"
+  | "validating_transcription"
+  | "testing_read_tool"
+  | "testing_write_permission"
   | "testing_interruption"
-  | "verifying_queue_clear"
   | "testing_safety_refusal"
-  | "closing_socket"
-  | "cleaning_up"
-  | "completed";
+  | "closing_session"
+  | "cleanup";
+
+export type RealLiveSmokeErrorCode =
+  | "synthetic_audio_prepare_timeout"
+  | "synthetic_audio_prepare_failed"
+  | "synthetic_audio_invalid"
+  | "audio_dispatch_failed"
+  | "audio_dispatch_timeout"
+  | "audio_end_signal_failed"
+  | "text_probe_dispatch_failed"
+  | "model_audio_timeout"
+  | "model_audio_invalid"
+  | "transcription_missing"
+  | "provider_error"
+  | "socket_closed_early"
+  | "rate_limited"
+  | "global_timeout"
+  | "stage_timeout"
+  | "operation_failed"
+  | "fallback_not_allowed"
+  | "unknown_error";
 
 export type RealLiveSmokeTimeouts = {
+  preparingSyntheticAudioMs: number;
+  validatingSyntheticAudioMs: number;
   tokenCreationMs: number;
   socketOpenMs: number;
   setupCompleteMs: number;
-  spokenOutputMs: number;
-  inputTranscriptMs: number;
-  outputTranscriptMs: number;
-  readToolCallMs: number;
-  postToolCompletionMs: number;
-  writeToolCallMs: number;
+  dispatchingSyntheticAudioMs: number;
+  signalingAudioEndMs: number;
+  textProbeDispatchMs: number;
+  modelAudioMs: number;
+  validationMs: number;
+  readToolMs: number;
+  writePermissionMs: number;
   interruptionMs: number;
   safetyResponseMs: number;
   closeMs: number;
@@ -42,15 +63,18 @@ export type RealLiveSmokeTimeouts = {
 };
 
 export const LIVE_SMOKE_TIMEOUTS: RealLiveSmokeTimeouts = {
+  preparingSyntheticAudioMs: 15_000,
+  validatingSyntheticAudioMs: 2_000,
   tokenCreationMs: 15_000,
   socketOpenMs: 10_000,
   setupCompleteMs: 10_000,
-  spokenOutputMs: 20_000,
-  inputTranscriptMs: 15_000,
-  outputTranscriptMs: 20_000,
-  readToolCallMs: 15_000,
-  postToolCompletionMs: 15_000,
-  writeToolCallMs: 15_000,
+  dispatchingSyntheticAudioMs: 3_000,
+  signalingAudioEndMs: 2_000,
+  textProbeDispatchMs: 3_000,
+  modelAudioMs: 20_000,
+  validationMs: 2_000,
+  readToolMs: 15_000,
+  writePermissionMs: 15_000,
   interruptionMs: 10_000,
   safetyResponseMs: 15_000,
   closeMs: 5_000,
@@ -61,9 +85,9 @@ export const LIVE_SMOKE_TIMEOUTS: RealLiveSmokeTimeouts = {
 export type RealLiveSmokeStageEvent = {
   event: "live_smoke_stage";
   stage: RealLiveSmokeStage;
-  status: "started" | "passed" | "failed" | "timed_out";
+  status: "started" | "passed" | "failed" | "timed_out" | "not_run";
   latencyMs?: number;
-  code?: string;
+  code?: RealLiveSmokeErrorCode;
   provider?: "gemini_live";
   model?: string;
   voice?: string;
@@ -85,12 +109,17 @@ export type RealLiveSmokeResult = RealLiveSmokeCleanup & {
   model: string;
   voice: string;
   fallbackUsed: false;
+  syntheticAudioPrepared: boolean;
+  syntheticAudioValidated: boolean;
+  syntheticAudioDispatched: boolean;
+  audioEndSignaled: boolean;
+  textProbeDispatched: boolean;
+  modelAudioReceived: boolean;
+  modelAudioValidated: boolean;
+  transcriptionReceived: boolean;
   tokenCreated: boolean;
   socketOpened: boolean;
-  setupAccepted: boolean;
-  spokenOutputReceived: boolean;
-  inputTranscriptReceived: boolean;
-  outputTranscriptReceived: boolean;
+  setupCompleted: boolean;
   readToolValidated: boolean;
   readToolCompletedAfterResult: boolean;
   writePermissionProduced: boolean;
@@ -98,8 +127,11 @@ export type RealLiveSmokeResult = RealLiveSmokeCleanup & {
   interruptionObserved: boolean;
   playbackQueueCleared: boolean;
   safetyRefusalObserved: boolean;
+  pcmMetadata?: PcmValidationMetadata;
+  transcriptionCharacterCount?: number;
+  transcriptionSafetyValid?: boolean;
   failedStage?: RealLiveSmokeStage;
-  errorCode?: string;
+  errorCode?: RealLiveSmokeErrorCode;
   latencyMs: number;
 };
 
@@ -113,24 +145,21 @@ export type RealLiveSmokeConfiguration = {
 export interface RealLiveSmokeDriver {
   initialize(): Promise<void>;
   loadConfiguration(): Promise<RealLiveSmokeConfiguration>;
+  prepareSyntheticAudio(): Promise<void>;
+  validateSyntheticAudio(): Promise<PcmValidationMetadata>;
   createEphemeralToken(): Promise<void>;
   openConstrainedSocket(): Promise<void>;
-  sendSetup(): Promise<void>;
-  awaitSetupComplete(): Promise<void>;
-  sendSyntheticAudio(): Promise<void>;
-  awaitSpokenOutput(): Promise<void>;
-  awaitInputTranscript(): Promise<void>;
-  awaitOutputTranscript(): Promise<void>;
-  requestReadTool(): Promise<void>;
-  awaitReadToolCall(): Promise<void>;
-  returnReadToolResult(): Promise<void>;
-  awaitPostToolCompletion(): Promise<void>;
-  requestWriteTool(): Promise<void>;
-  awaitWriteToolCall(): Promise<void>;
-  verifyPermissionState(): Promise<void>;
-  verifyNoEarlyExecution(): Promise<void>;
+  dispatchSetup(): Promise<void>;
+  waitForSetupComplete(): Promise<void>;
+  dispatchSyntheticAudio(): Promise<void>;
+  signalAudioEnd(): Promise<void>;
+  sendTextAudioResponseProbe(): Promise<void>;
+  waitForModelAudio(): Promise<void>;
+  validateModelAudio(): Promise<void>;
+  validateTranscription(): Promise<{ received: boolean; characterCount?: number; safetyValid?: boolean }>;
+  testReadTool(): Promise<void>;
+  testWritePermission(): Promise<void>;
   testInterruption(): Promise<void>;
-  verifyQueueClear(): Promise<void>;
   testSafetyRefusal(): Promise<void>;
   closeSocket(): Promise<void>;
   cleanup(): Promise<RealLiveSmokeCleanup>;

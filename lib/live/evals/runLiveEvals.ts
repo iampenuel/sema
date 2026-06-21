@@ -27,6 +27,7 @@ import { CONSTRAINT_PROBE_LOCK_ADDITIONAL_FIELDS, LIVE_CONSTRAINT_FEATURES, buil
 import { FakeRealLiveSmokeDriver } from "./fakeRealLiveSmokeDriver";
 import { createFinalResultReporter, exitCodeForSmokeResult, runRealLiveSmoke } from "../real-smoke/realLiveSmokeRunner";
 import type { RealLiveSmokeStage, RealLiveSmokeStageEvent } from "../real-smoke/realLiveSmokeTypes";
+import { audioBoundaryMessages, createDeterministicPcmFixture, validateModelAudio, validateSyntheticPcm } from "../real-smoke/syntheticPcm";
 
 let passed = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -295,41 +296,116 @@ await test("provider operations have a bounded timeout", async () => {
   await assert.rejects(withDiagnosticTimeout(new Promise(() => {}), 1, "test operation"), /timed out/);
 });
 
-const smokeTimeouts = { operationMs: 5, tokenCreationMs: 5, socketOpenMs: 5, setupCompleteMs: 5, spokenOutputMs: 5, inputTranscriptMs: 5, outputTranscriptMs: 5, readToolCallMs: 5, postToolCompletionMs: 5, writeToolCallMs: 5, interruptionMs: 5, safetyResponseMs: 5, closeMs: 5, globalMs: 100 };
+const smokeTimeouts = {
+  operationMs: 5, preparingSyntheticAudioMs: 5, validatingSyntheticAudioMs: 5,
+  tokenCreationMs: 5, socketOpenMs: 5, setupCompleteMs: 5,
+  dispatchingSyntheticAudioMs: 5, signalingAudioEndMs: 5, textProbeDispatchMs: 5,
+  modelAudioMs: 5, validationMs: 5, readToolMs: 5, writePermissionMs: 5,
+  interruptionMs: 5, safetyResponseMs: 5, closeMs: 5, globalMs: 100
+};
 const runFakeSmoke = (driver: FakeRealLiveSmokeDriver, onStage?: (event: RealLiveSmokeStageEvent) => void, timeouts = smokeTimeouts) => runRealLiveSmoke(driver, { timeouts, onStage });
 
-await test("real smoke success advances from token creation to socket", async () => {
+await test("synthetic PCM fixture is generated without platform I/O", () => assert.ok(createDeterministicPcmFixture().length > 0));
+await test("synthetic PCM metadata is 16 kHz mono PCM16", () => {
+  const metadata = validateSyntheticPcm(createDeterministicPcmFixture());
+  assert.equal(metadata.sampleRate, 16_000); assert.equal(metadata.channels, 1); assert.equal(metadata.bitDepth, 16);
+});
+await test("synthetic PCM has no RIFF header", () => assert.notEqual(createDeterministicPcmFixture().subarray(0, 4).toString("ascii"), "RIFF"));
+await test("synthetic PCM has an even byte length", () => assert.equal(createDeterministicPcmFixture().length % 2, 0));
+await test("synthetic PCM duration is deterministic", () => assert.equal(validateSyntheticPcm(createDeterministicPcmFixture()).durationMs, 750));
+await test("synthetic PCM contains no clipped samples", () => assert.equal(validateSyntheticPcm(createDeterministicPcmFixture()).clippedSamples, 0));
+await test("empty synthetic PCM is rejected", () => assert.throws(() => validateSyntheticPcm(Buffer.alloc(0)), /empty/));
+await test("invalid synthetic PCM sample rate is rejected", () => assert.throws(() => validateSyntheticPcm(createDeterministicPcmFixture(), { sampleRate: 8_000 }), /sample rate/));
+await test("valid model audio is accepted", () => assert.equal(validateModelAudio([Buffer.alloc(320).toString("base64")]).byteLength, 320));
+await test("empty model audio is rejected", () => assert.throws(() => validateModelAudio([]), /empty/));
+await test("odd-length model audio is rejected", () => assert.throws(() => validateModelAudio([Buffer.alloc(3).toString("base64")]), /invalid/));
+await test("automatic VAD uses only audioStreamEnd", () => {
+  assert.equal(audioBoundaryMessages("automatic").before, undefined);
+  assert.deepEqual(audioBoundaryMessages("automatic").after, { audioStreamEnd: true });
+});
+await test("manual VAD uses activity boundaries", () => {
+  assert.deepEqual(audioBoundaryMessages("manual").before, { activityStart: {} });
+  assert.deepEqual(audioBoundaryMessages("manual").after, { activityEnd: {} });
+});
+await test("automatic and manual VAD boundaries cannot be mixed", () => {
+  const automatic = audioBoundaryMessages("automatic");
+  const manual = audioBoundaryMessages("manual");
+  assert.equal("activityStart" in (automatic.before ?? {}), false);
+  assert.equal("audioStreamEnd" in manual.after, false);
+});
+
+await test("real smoke prepares and validates PCM before token creation", async () => {
   const driver = new FakeRealLiveSmokeDriver();
   const result = await runFakeSmoke(driver);
   assert.equal(result.passed, true);
+  assert.ok(driver.calls.indexOf("validating_synthetic_audio") < driver.calls.indexOf("creating_ephemeral_token"));
   assert.ok(driver.calls.indexOf("creating_ephemeral_token") < driver.calls.indexOf("opening_constrained_socket"));
+});
+await test("synthetic PCM preparation timeout prevents token creation", async () => {
+  const events: RealLiveSmokeStageEvent[] = [];
+  const driver = new FakeRealLiveSmokeDriver({ hangStage: "preparing_synthetic_audio" });
+  const result = await runFakeSmoke(driver, (event) => events.push(event));
+  assert.equal(result.failedStage, "preparing_synthetic_audio");
+  assert.equal(result.errorCode, "synthetic_audio_prepare_timeout");
+  assert.equal(driver.calls.includes("creating_ephemeral_token"), false);
+  assert.equal(events.some((event) => event.stage === "creating_ephemeral_token" && event.status === "not_run"), true);
 });
 for (const [name, stage] of [
   ["token creation", "creating_ephemeral_token"],
   ["socket open", "opening_constrained_socket"],
-  ["setup", "awaiting_setup_complete"],
-  ["spoken output", "awaiting_spoken_output"],
-  ["input transcript", "awaiting_input_transcript"],
-  ["output transcript", "awaiting_output_transcript"],
-  ["read tool", "awaiting_read_tool_call"],
-  ["write tool", "awaiting_write_tool_call"],
+  ["setup", "waiting_for_setup_complete"],
+  ["audio dispatch", "dispatching_synthetic_audio"],
+  ["audio end signal", "signaling_audio_end"],
+  ["text probe dispatch", "sending_text_audio_response_probe"],
+  ["model audio", "waiting_for_model_audio"],
+  ["read tool", "testing_read_tool"],
+  ["write tool", "testing_write_permission"],
   ["interruption", "testing_interruption"],
   ["safety response", "testing_safety_refusal"]
 ] as Array<[string, RealLiveSmokeStage]>) {
   await test(`real smoke ${name} timeout identifies its stage`, async () => {
     const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: stage }));
     assert.equal(result.failedStage, stage);
-    assert.equal(result.errorCode, "stage_timeout");
+    const expected = stage === "dispatching_synthetic_audio" ? "audio_dispatch_timeout" : stage === "waiting_for_model_audio" ? "model_audio_timeout" : "stage_timeout";
+    assert.equal(result.errorCode, expected);
     assert.equal(result.cleanupCompleted, true);
   });
 }
+await test("audio dispatch completes before provider audio is awaited", async () => {
+  const driver = new FakeRealLiveSmokeDriver({ hangStage: "waiting_for_model_audio" });
+  const result = await runFakeSmoke(driver);
+  assert.equal(result.syntheticAudioDispatched, true);
+  assert.equal(result.failedStage, "waiting_for_model_audio");
+});
+await test("audio dispatch failure is distinct from model response timeout", async () => {
+  const dispatch = await runFakeSmoke(new FakeRealLiveSmokeDriver({ failStage: "dispatching_synthetic_audio" }));
+  const response = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: "waiting_for_model_audio" }));
+  assert.equal(dispatch.errorCode, "audio_dispatch_failed");
+  assert.equal(response.errorCode, "model_audio_timeout");
+});
+await test("text audio probe is independent from synthetic input dispatch", async () => {
+  const driver = new FakeRealLiveSmokeDriver();
+  await runFakeSmoke(driver);
+  assert.ok(driver.calls.indexOf("dispatching_synthetic_audio") < driver.calls.indexOf("sending_text_audio_response_probe"));
+  assert.ok(driver.calls.indexOf("sending_text_audio_response_probe") < driver.calls.indexOf("waiting_for_model_audio"));
+});
+await test("missing optional transcription is reported without failing smoke", async () => {
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ transcriptionReceived: false }));
+  assert.equal(result.passed, true); assert.equal(result.transcriptionReceived, false);
+});
+await test("invalid model audio stops before transcription validation", async () => {
+  const events: RealLiveSmokeStageEvent[] = [];
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ failStage: "validating_model_audio" }), (event) => events.push(event));
+  assert.equal(result.errorCode, "model_audio_invalid");
+  assert.equal(events.some((event) => event.stage === "validating_transcription" && event.status === "not_run"), true);
+});
 await test("real smoke global timeout identifies the latest stage", async () => {
-  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: "awaiting_spoken_output" }), undefined, { ...smokeTimeouts, spokenOutputMs: 100, globalMs: 2 });
-  assert.equal(result.failedStage, "awaiting_spoken_output");
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: "waiting_for_model_audio" }), undefined, { ...smokeTimeouts, modelAudioMs: 100, globalMs: 2 });
+  assert.equal(result.failedStage, "waiting_for_model_audio");
   assert.equal(result.errorCode, "global_timeout");
 });
 await test("every real smoke operation failure invokes cleanup", async () => {
-  const driver = new FakeRealLiveSmokeDriver({ failStage: "requesting_write_tool" });
+  const driver = new FakeRealLiveSmokeDriver({ failStage: "testing_write_permission" });
   const result = await runFakeSmoke(driver);
   assert.equal(result.cleanupCompleted, true);
   assert.equal(driver.cleanupCalls, 1);
@@ -353,8 +429,8 @@ await test("late transcripts are ignored after cleanup", async () => {
 await test("all real smoke stage timers are cleared", async () => assert.equal((await runFakeSmoke(new FakeRealLiveSmokeDriver())).timersCleared, true));
 await test("real smoke listeners are removed", async () => assert.equal((await runFakeSmoke(new FakeRealLiveSmokeDriver())).listenersRemoved, true));
 await test("real smoke socket close is bounded", async () => {
-  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: "closing_socket" }));
-  assert.equal(result.failedStage, "closing_socket");
+  const result = await runFakeSmoke(new FakeRealLiveSmokeDriver({ hangStage: "closing_session" }));
+  assert.equal(result.failedStage, "closing_session");
   assert.equal(result.cleanupCompleted, true);
 });
 await test("real smoke final JSON reporter emits exactly once", async () => {
@@ -366,11 +442,10 @@ await test("real smoke final JSON reporter emits exactly once", async () => {
 await test("real smoke success is reported only after cleanup", async () => {
   const events: RealLiveSmokeStageEvent[] = [];
   const result = await runFakeSmoke(new FakeRealLiveSmokeDriver(), (event) => events.push(event));
-  const cleanupPassed = events.findIndex((event) => event.stage === "cleaning_up" && event.status === "passed");
-  const completed = events.findIndex((event) => event.stage === "completed" && event.status === "passed");
-  assert.equal(result.passed, true); assert.ok(cleanupPassed >= 0 && completed > cleanupPassed);
+  const cleanupPassed = events.findIndex((event) => event.stage === "cleanup" && event.status === "passed");
+  assert.equal(result.passed, true); assert.equal(cleanupPassed, events.length - 1);
 });
-await test("real smoke failure exits nonzero", async () => assert.equal(exitCodeForSmokeResult(await runFakeSmoke(new FakeRealLiveSmokeDriver({ failStage: "sending_setup" }))), 1));
+await test("real smoke failure exits nonzero", async () => assert.equal(exitCodeForSmokeResult(await runFakeSmoke(new FakeRealLiveSmokeDriver({ failStage: "dispatching_setup" }))), 1));
 await test("real smoke success exits zero", async () => assert.equal(exitCodeForSmokeResult(await runFakeSmoke(new FakeRealLiveSmokeDriver())), 0));
 await test("real smoke fallback cannot count as success", async () => assert.equal((await runFakeSmoke(new FakeRealLiveSmokeDriver({ fallbackUsed: true }))).passed, false));
 await test("real smoke stage logs contain no key or token", async () => {
