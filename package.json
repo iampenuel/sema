@@ -14,6 +14,7 @@
     "test:live:constraints": "node --import tsx lib/live/evals/runLiveConstraintProbes.ts",
     "test:live:preflight": "node --import tsx lib/live/evals/runLivePreflight.ts",
     "test:live:real": "node --import tsx lib/live/evals/runRealLiveSmoke.ts",
+    "test:live:write-tool": "node --import tsx lib/live/evals/runWriteToolProbe.ts",
     "test:ai:model": "node --import tsx lib/ai/evals/testModelPreflight.ts",
     "test:ai:live": "node --import tsx lib/ai/evals/runLiveSmoke.ts",
     "test:ai:live:story:debug": "node --import tsx lib/ai/evals/debugLiveStory.ts",

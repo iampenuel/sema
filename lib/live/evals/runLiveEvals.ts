@@ -28,6 +28,24 @@ import { FakeRealLiveSmokeDriver } from "./fakeRealLiveSmokeDriver";
 import { createFinalResultReporter, exitCodeForSmokeResult, runRealLiveSmoke } from "../real-smoke/realLiveSmokeRunner";
 import type { RealLiveSmokeStage, RealLiveSmokeStageEvent } from "../real-smoke/realLiveSmokeTypes";
 import { audioBoundaryMessages, createDeterministicPcmFixture, validateModelAudio, validateSyntheticPcm } from "../real-smoke/syntheticPcm";
+import { LIVE_SYSTEM_INSTRUCTION } from "../liveSystemInstruction";
+import { LIVE_FUNCTION_DECLARATIONS } from "../liveTools";
+import { FakeWriteToolProbeDriver } from "./fakeWriteToolProbeDriver";
+import {
+  WRITE_TOOL_PROBE_DECLARATIONS,
+  WRITE_TOOL_PROBE_PROMPT,
+  WRITE_TOOL_PROBE_SYSTEM_INSTRUCTION,
+  classifyToollessTurn,
+  createConfirmationRequiredResponse,
+  createWriteRequestRealtimeInput,
+  evaluateCanonicalWritePermission,
+  hasEarlyCompletionClaim,
+  isConfirmationRequiredAcknowledgement,
+  sanitizeWriteProbeEvent,
+  validateCanonicalWriteAction,
+  validateDedicatedWriteCall
+} from "../write-tool-probe/writeToolProbeCore";
+import { createWriteToolProbeReporter, runWriteToolProbe, writeToolProbeExitCode } from "../write-tool-probe/writeToolProbeRunner";
 
 let passed = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -458,6 +476,108 @@ await test("real smoke failures never log authenticated URLs", async () => {
   const events: RealLiveSmokeStageEvent[] = [];
   await runFakeSmoke(new FakeRealLiveSmokeDriver({ failStage: "opening_constrained_socket" }), (event) => events.push(event));
   assert.equal(JSON.stringify(events).includes("access_token="), false);
+});
+
+const writeProbeTimeouts = {
+  operationMs: 5, tokenMs: 5, socketMs: 5, setupMs: 5, promptMs: 5,
+  toolCallMs: 5, validationMs: 5, permissionMs: 5, responseMs: 5,
+  acknowledgementMs: 5, closeMs: 5, cleanupMs: 5, globalMs: 100
+};
+const runFakeWriteProbe = (driver: FakeWriteToolProbeDriver, timeouts = writeProbeTimeouts) => runWriteToolProbe(driver, { timeouts });
+const writeCall = { id: "write-1", name: "prepareEvidencePacket", args: {} };
+
+await test("dedicated write probe declares only prepareEvidencePacket", () => {
+  assert.equal(WRITE_TOOL_PROBE_DECLARATIONS.length, 1);
+  assert.equal(WRITE_TOOL_PROBE_DECLARATIONS[0].name, "prepareEvidencePacket");
+});
+await test("production Live tool allowlist remains unchanged", () => assert.equal(LIVE_FUNCTION_DECLARATIONS.length, 10));
+await test("test-only write instruction does not replace production instruction", () => {
+  assert.notEqual(WRITE_TOOL_PROBE_SYSTEM_INSTRUCTION, LIVE_SYSTEM_INSTRUCTION);
+  assert.match(LIVE_SYSTEM_INSTRUCTION, /page-aware evidence organization assistant/);
+});
+await test("write request uses real-time text input shape", () => {
+  assert.deepEqual(createWriteRequestRealtimeInput(), { text: WRITE_TOOL_PROBE_PROMPT });
+  assert.equal("turnComplete" in createWriteRequestRealtimeInput(), false);
+});
+await test("write request follows setup completion", async () => {
+  const driver = new FakeWriteToolProbeDriver(); await runFakeWriteProbe(driver);
+  assert.ok(driver.calls.indexOf("waiting_for_setup_complete") < driver.calls.indexOf("sending_write_request"));
+});
+await test("write request starts before any model turn stage", async () => {
+  const driver = new FakeWriteToolProbeDriver(); await runFakeWriteProbe(driver);
+  assert.ok(driver.calls.indexOf("sending_write_request") < driver.calls.indexOf("waiting_for_write_tool_call"));
+});
+await test("sanitized write trace excludes user text", () => {
+  const unsafe = { event: "write_prompt_sent" as const, elapsedMs: 1, userText: WRITE_TOOL_PROBE_PROMPT };
+  assert.equal(JSON.stringify(sanitizeWriteProbeEvent(unsafe)).includes(WRITE_TOOL_PROBE_PROMPT), false);
+});
+await test("sanitized write trace excludes tokens and URLs", () => {
+  const unsafe = { event: "socket_open" as const, elapsedMs: 1, token: "auth_tokens/secret", url: "wss://example.test?access_token=secret" };
+  const output = JSON.stringify(sanitizeWriteProbeEvent(unsafe));
+  assert.equal(/auth_tokens|access_token|wss:/.test(output), false);
+});
+await test("expected dedicated write tool passes", () => assert.equal(validateDedicatedWriteCall(writeCall).ok, true));
+await test("unexpected dedicated write tool fails", () => assert.equal(validateDedicatedWriteCall({ ...writeCall, name: "readCurrentPage" }).ok, false));
+await test("missing function-call ID fails", () => assert.deepEqual(validateDedicatedWriteCall({ ...writeCall, id: "" }), { ok: false, code: "write_tool_missing_id" }));
+await test("unknown write-tool argument fails", () => assert.deepEqual(validateDedicatedWriteCall({ ...writeCall, args: { arbitrary: true } }), { ok: false, code: "write_tool_payload_invalid" }));
+await test("model cannot supply trusted risk", () => assert.equal(validateDedicatedWriteCall({ ...writeCall, args: { riskLevel: "read_only" } }).ok, false));
+await test("model cannot supply permission outcome", () => assert.equal(validateDedicatedWriteCall({ ...writeCall, args: { permissionRequired: false } }).ok, false));
+await test("canonical registry determines write risk", () => assert.equal(validateCanonicalWriteAction(writeCall, approved).riskLevel, "write"));
+await test("canonical permission gate requires visible confirmation", () => {
+  const action = validateCanonicalWriteAction(writeCall, approved);
+  assert.equal(evaluateCanonicalWritePermission(writeCall, action).permissionRequired, true);
+});
+await test("canonical permission evaluation does not mutate session", () => {
+  const before = JSON.stringify(approved);
+  evaluateCanonicalWritePermission(writeCall, validateCanonicalWriteAction(writeCall, approved));
+  assert.equal(JSON.stringify(approved), before);
+});
+await test("canonical permission evaluation creates no packet", () => {
+  evaluateCanonicalWritePermission(writeCall, validateCanonicalWriteAction(writeCall, approved));
+  assert.equal(approved.packetDraft, undefined);
+});
+await test("permission response uses matching function-call ID", () => {
+  assert.equal(createConfirmationRequiredResponse(writeCall).functionResponses[0].id, writeCall.id);
+});
+await test("permission response reports confirmation_required", () => {
+  assert.equal(createConfirmationRequiredResponse(writeCall).functionResponses[0].response.status, "confirmation_required");
+});
+await test("permission response never reports false success", () => {
+  assert.equal(createConfirmationRequiredResponse(writeCall).functionResponses[0].response.ok, false);
+});
+await test("early packet-completion wording is rejected", () => assert.equal(hasEarlyCompletionClaim("Your evidence packet is ready."), true));
+await test("confirmation-required acknowledgement passes", () => {
+  assert.equal(isConfirmationRequiredAcknowledgement("The packet is not prepared. You must confirm on screen first."), true);
+});
+await test("spoken response without a tool is classified separately", () => assert.equal(classifyToollessTurn(true), "model_spoke_instead_of_tool"));
+await test("turn completion without a tool is classified separately", () => assert.equal(classifyToollessTurn(false), "turn_completed_without_tool"));
+await test("write-tool timeout invokes cleanup", async () => {
+  const driver = new FakeWriteToolProbeDriver({ hangStage: "waiting_for_write_tool_call" });
+  const result = await runFakeWriteProbe(driver);
+  assert.equal(result.errorCode, "write_tool_timeout"); assert.equal(result.cleanupCompleted, true);
+});
+await test("write-probe provider error invokes cleanup", async () => {
+  const driver = new FakeWriteToolProbeDriver({ failStage: "opening_socket" });
+  const result = await runFakeWriteProbe(driver);
+  assert.equal(result.errorCode, "provider_error"); assert.equal(result.cleanupCompleted, true);
+});
+await test("write-probe socket closes cleanly", async () => assert.equal((await runFakeWriteProbe(new FakeWriteToolProbeDriver())).socketClosed, true));
+await test("write probe has no automatic retry", async () => {
+  const driver = new FakeWriteToolProbeDriver({ failStage: "opening_socket" }); await runFakeWriteProbe(driver);
+  assert.equal(driver.calls.filter((stage) => stage === "creating_ephemeral_token").length, 1);
+});
+await test("write probe passes only after permission acknowledgement", async () => {
+  const result = await runFakeWriteProbe(new FakeWriteToolProbeDriver());
+  assert.equal(result.passed, true); assert.equal(result.permissionAcknowledgementReceived, true); assert.equal(result.actionExecuted, false);
+});
+await test("write probe final reporter emits exactly once", async () => {
+  const lines: string[] = []; const report = createWriteToolProbeReporter((line) => lines.push(line));
+  const result = await runFakeWriteProbe(new FakeWriteToolProbeDriver());
+  assert.equal(report(result), true); assert.equal(report(result), false); assert.equal(lines.length, 1);
+});
+await test("write probe failure exits nonzero", async () => {
+  const result = await runFakeWriteProbe(new FakeWriteToolProbeDriver({ hangStage: "waiting_for_write_tool_call" }));
+  assert.equal(writeToolProbeExitCode(result), 1);
 });
 
   process.stdout.write(`\n${passed} local Gemini Live architecture checks passed. No provider call was made.\n`);
