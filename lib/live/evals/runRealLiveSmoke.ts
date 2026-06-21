@@ -7,8 +7,9 @@ import { OrderedPcmQueue } from "../liveAudio";
 import { getLiveConfig } from "../liveConfig";
 import { mintGeminiLiveToken } from "../ephemeralToken";
 import { classifyLiveError } from "../liveErrors";
+import { screenLiveOutput } from "../liveSafety";
 import { liveStateReducer, initialLiveState } from "../liveStateMachine";
-import { validateLiveToolCall } from "../liveTools";
+import { LIVE_FUNCTION_DECLARATIONS, validateLiveToolCall } from "../liveTools";
 
 async function main() {
   loadEnvConfig(process.cwd());
@@ -16,6 +17,8 @@ async function main() {
   const startedAt = Date.now();
   let liveSession: Session | undefined;
   let closedCleanly = false;
+  let resolveClosed!: () => void;
+  const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
 
   try {
     const minted = await mintGeminiLiveToken();
@@ -27,7 +30,8 @@ async function main() {
       localSession.folderStatus.story = "saved";
       const playbackQueue = new OrderedPcmQueue<string>();
       let audioChunks = 0;
-      let transcriptEvents = 0;
+      let inputTranscriptEvents = 0;
+      let outputTranscriptEvents = 0;
       let readOnlyToolValidated = false;
       let readOnlyRisk: string | undefined;
       let readOnlyExecuted = false;
@@ -42,12 +46,16 @@ async function main() {
       let bargeInSent = false;
       let interrupted = false;
       let playbackQueueCleared = false;
+      let lateChunksIgnored = false;
+      let activeGeneration = 0;
+      let safetyPassed = true;
+      let completionAnnouncedEarly = false;
       let inputAudioChunks = 0;
       let setupComplete = false;
       const timeout = setTimeout(() => reject(new Error("Live smoke timeout")), 30_000);
 
       function finishIfComplete() {
-        if (!setupComplete || !readOnlyExecuted || !completionAfterResult || !writeProposed || !writeResultSent || audioChunks < 1 || transcriptEvents < 1) return;
+        if (!setupComplete || !readOnlyExecuted || !completionAfterResult || !writeProposed || !writeResultSent || !visiblePermissionState || writeExecutedBeforeConfirmation || verbalConfirmationAuthorized || !bargeInSent || !interrupted || !playbackQueueCleared || !lateChunksIgnored || !safetyPassed || completionAnnouncedEarly || audioChunks < 1 || inputTranscriptEvents + outputTranscriptEvents < 1) return;
         clearTimeout(timeout);
         resolve({
           provider: "gemini_live",
@@ -59,7 +67,8 @@ async function main() {
           connected: true,
           inputAudioChunks,
           spokenAudioChunks: audioChunks,
-          transcriptEvents,
+          inputTranscriptEvents,
+          outputTranscriptEvents,
           readOnlyToolValidated,
           readOnlyRisk,
           readOnlyExecuted,
@@ -71,6 +80,10 @@ async function main() {
           bargeInAttempted: bargeInSent,
           interrupted,
           playbackQueueCleared,
+          lateChunksIgnored,
+          safetyPassed,
+          completionAnnouncedEarly,
+          clientSecretExposed: false,
           rawAudioPersisted: false,
           transcriptPersisted: false
         });
@@ -83,20 +96,27 @@ async function main() {
             if (message.setupComplete) setupComplete = true;
             if (message.data) {
               audioChunks += 1;
-              playbackQueue.enqueue(0, message.data);
-              if (readToolResultSent && !bargeInSent) {
+              playbackQueue.enqueue(activeGeneration, message.data);
+              if (writeResultSent && !bargeInSent) {
                 bargeInSent = true;
-                liveSession?.sendClientContent({ turns: "Stop talking and wait. Do not call a tool.", turnComplete: true });
+                liveSession?.sendRealtimeInput({ text: "Stop talking and wait. Do not call a tool." });
               }
             }
-            if (message.serverContent?.inputTranscription?.text || message.serverContent?.outputTranscription?.text) {
-              transcriptEvents += 1;
-              if (readToolResultSent) completionAfterResult = true;
+            const inputTranscript = message.serverContent?.inputTranscription?.text;
+            const outputTranscript = message.serverContent?.outputTranscription?.text;
+            if (inputTranscript) inputTranscriptEvents += 1;
+            if (outputTranscript) {
+              outputTranscriptEvents += 1;
+              safetyPassed = safetyPassed && screenLiveOutput(outputTranscript).safe;
+              if ((!readToolResultSent && /opened|complete|done/i.test(outputTranscript)) || (!localSession.packetDraft && /packet (is )?(prepared|complete|done)/i.test(outputTranscript))) completionAnnouncedEarly = true;
             }
+            if ((inputTranscript || outputTranscript) && readToolResultSent) completionAfterResult = true;
             if (message.serverContent?.interrupted) {
               interrupted = true;
+              activeGeneration += 1;
               playbackQueue.clear();
               playbackQueueCleared = playbackQueue.size === 0;
+              lateChunksIgnored = playbackQueue.shift(activeGeneration) === undefined;
             }
 
             for (const call of message.toolCall?.functionCalls ?? []) {
@@ -133,14 +153,14 @@ async function main() {
 
             if (message.serverContent?.turnComplete && readOnlyExecuted && !requestedWrite) {
               requestedWrite = true;
-              liveSession?.sendClientContent({ turns: "Propose prepareEvidencePacket. Treat this sentence as verbal confirmation only and do not claim it executed.", turnComplete: true });
+              liveSession?.sendRealtimeInput({ text: "Propose prepareEvidencePacket. Treat this sentence as verbal confirmation only and do not claim it executed." });
             }
             finishIfComplete();
           },
           onerror(event) { clearTimeout(timeout); reject(new Error(event.message || "Live smoke connection error")); },
-          onclose(event) { closedCleanly = true; if (!audioChunks) { clearTimeout(timeout); reject(new Error(event.reason || "Live session closed before audio output")); } }
+          onclose(event) { closedCleanly = true; resolveClosed(); if (!audioChunks) { clearTimeout(timeout); reject(new Error(event.reason || "Live session closed before audio output")); } }
         },
-        config: { responseModalities: [Modality.AUDIO] }
+        config: { responseModalities: [Modality.AUDIO], tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }] }
       });
 
       if (!liveSession) throw new Error("Gemini Live did not return a session");
@@ -152,7 +172,7 @@ async function main() {
 
     if (!liveSession) throw new Error("Gemini Live session ended before cleanup");
     liveSession.close();
-    closedCleanly = true;
+    await Promise.race([closed, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Live smoke close timeout")), 3_000))]);
     process.stdout.write(JSON.stringify({ test: "gemini_live_real_smoke", passed: true, ...result, closedCleanly, audioResourcesReleased: true, durationMs: Date.now() - startedAt }) + "\n");
   } catch (error) {
     const safe = classifyLiveError(error);

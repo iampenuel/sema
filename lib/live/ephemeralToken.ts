@@ -1,6 +1,5 @@
 import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
 import { getLiveConfig } from "./liveConfig";
-import { LIVE_FUNCTION_DECLARATIONS } from "./liveTools";
 import { LIVE_SYSTEM_INSTRUCTION } from "./liveSystemInstruction";
 import { buildLiveTokenTimes } from "./liveTokenPolicy";
 
@@ -23,13 +22,12 @@ export async function mintGeminiLiveToken(now = Date.now()) {
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voiceName } } },
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction: LIVE_SYSTEM_INSTRUCTION,
-          tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }],
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           sessionResumption: {}
         }
       },
-      lockAdditionalFields: ["config.systemInstruction", "config.tools", "config.responseModalities", "config.speechConfig"]
+      lockAdditionalFields: []
     }
   });
   if (!token.name) throw new Error("Gemini did not return an ephemeral token.");

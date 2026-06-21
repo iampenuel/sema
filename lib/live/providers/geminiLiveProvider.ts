@@ -3,6 +3,7 @@
 import { GoogleGenAI, Modality, type Session } from "@google/genai";
 import type { LiveProvider, LiveProviderEvent, LiveTokenResponse, LiveToolCall } from "../liveTypes";
 import { classifyLiveError } from "../liveErrors";
+import { LIVE_FUNCTION_DECLARATIONS } from "../liveTools";
 
 export class GeminiLiveProvider implements LiveProvider {
   private session?: Session;
@@ -38,7 +39,7 @@ export class GeminiLiveProvider implements LiveProvider {
           if (message.serverContent?.turnComplete) onEvent({ type: "turn_complete" });
         }
       },
-      config: { responseModalities: [Modality.AUDIO] }
+      config: { responseModalities: [Modality.AUDIO], tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }] }
     });
   }
 

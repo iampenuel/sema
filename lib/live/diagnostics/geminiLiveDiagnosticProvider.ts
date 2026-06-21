@@ -100,9 +100,9 @@ export function createGeminiLiveDiagnosticDependencies(timeoutMs = DEFAULT_TIMEO
       }), timeoutMs, "Minimal token creation");
       return { name: token.name ?? "", expiresAt: expiresAt.toISOString() };
     },
-    async connectConstrained(token: DiagnosticToken) {
+    async connectConstrained(token: DiagnosticToken, liveConfig = { responseModalities: [Modality.AUDIO] }) {
       const client = new GoogleGenAI({ apiKey: token.name, httpOptions: { apiVersion: TOKEN_API_VERSION } });
-      return connectUntilSetup(client, config.model, { responseModalities: [Modality.AUDIO] }, timeoutMs);
+      return connectUntilSetup(client, config.model, liveConfig, timeoutMs);
     }
   };
 }

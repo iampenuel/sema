@@ -68,7 +68,7 @@ export type DiagnosticDependencies = {
   checkModelVisibility(): Promise<ModelVisibilityOutcome>;
   connectDirect(): Promise<ConnectionOutcome>;
   createMinimalToken(): Promise<DiagnosticToken>;
-  connectConstrained(token: DiagnosticToken): Promise<ConnectionOutcome>;
+  connectConstrained(token: DiagnosticToken, config?: import("@google/genai").LiveConnectConfig): Promise<ConnectionOutcome>;
 };
 
 export type DiagnosticReport = {

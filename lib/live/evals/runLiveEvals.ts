@@ -23,7 +23,7 @@ import {
   withDiagnosticTimeout,
   type DiagnosticDependencies
 } from "../diagnostics/liveDiagnosticCore";
-import { LIVE_CONSTRAINT_FEATURES, runConstraintProbes } from "../diagnostics/liveConstraintProbes";
+import { CONSTRAINT_PROBE_LOCK_ADDITIONAL_FIELDS, LIVE_CONSTRAINT_FEATURES, buildTokenConstraintConfig, runConstraintProbes } from "../diagnostics/liveConstraintProbes";
 
 let passed = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -78,6 +78,10 @@ await test("all and only approved Live tools are declared", () => assert.deepEqu
 await test("tool declarations do not expose trusted risk", async () => {
   const declarations = (await import("../liveTools")).LIVE_FUNCTION_DECLARATIONS;
   assert.equal(JSON.stringify(declarations).includes("riskLevel"), false);
+});
+await test("Live tools use the token-compatible OpenAPI parameter shape", async () => {
+  const declarations = (await import("../liveTools")).LIVE_FUNCTION_DECLARATIONS;
+  assert.equal(declarations.every((declaration) => declaration.parameters && !declaration.parametersJsonSchema), true);
 });
 await test("navigation tool validates", () => {
   const value = validateLiveToolCall({ id: "1", name: "openSignalFolder", args: { folderId: "audio" } }, session);
@@ -247,6 +251,11 @@ await test("permanent-key diagnostic uses normal server API version", () => asse
 await test("empty token setup allows connection setup", () => assert.equal(resolveTokenSetupSemantics({ hasEmbeddedSetup: false }), "connection_supplies_setup"));
 await test("embedded token setup replaces connection setup", () => assert.equal(resolveTokenSetupSemantics({ hasEmbeddedSetup: true }), "token_replaces_setup"));
 await test("field mask represents selective token overrides", () => assert.equal(resolveTokenSetupSemantics({ hasEmbeddedSetup: true, fieldMask: ["config.responseModalities"] }), "field_mask_overrides_connection"));
+await test("constraint probes lock only incrementally supplied fields", () => assert.deepEqual(CONSTRAINT_PROBE_LOCK_ADDITIONAL_FIELDS, []));
+await test("tool declarations are supplied at Live setup rather than embedded in the token", () => {
+  assert.equal(buildTokenConstraintConfig("one_read_only_tool", "Kore")?.tools, undefined);
+  assert.equal(buildTokenConstraintConfig("full_approved_tools", "Kore")?.tools, undefined);
+});
 await test("voice rejection has a dedicated code", () => assert.equal(classifyDiagnosticFailure(new Error("invalid setup"), "constraint_probe", "voice_kore").code, "voice_config_rejected"));
 await test("thinking rejection has a dedicated code", () => assert.equal(classifyDiagnosticFailure(new Error("invalid setup"), "constraint_probe", "thinking_low").code, "thinking_config_rejected"));
 await test("tool rejection has a dedicated code", () => assert.equal(classifyDiagnosticFailure(new Error("invalid schema"), "constraint_probe", "one_read_only_tool").code, "tool_config_rejected"));
@@ -277,6 +286,7 @@ await test("constraint probe list is ordered and has no hidden retries", async (
   });
   assert.equal(report.passed, true);
   assert.deepEqual(calls, [...LIVE_CONSTRAINT_FEATURES]);
+  assert.equal(report.results.every((result) => typeof result.latencyMs === "number"), true);
 });
 await test("provider operations have a bounded timeout", async () => {
   await assert.rejects(withDiagnosticTimeout(new Promise(() => {}), 1, "test operation"), /timed out/);
