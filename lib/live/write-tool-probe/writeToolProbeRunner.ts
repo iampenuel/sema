@@ -33,10 +33,10 @@ export const WRITE_TOOL_PROBE_TIMEOUTS: WriteToolProbeTimeouts = {
   validationMs: 2_000,
   permissionMs: 2_000,
   responseMs: 3_000,
-  acknowledgementMs: 15_000,
-  closeMs: 5_000,
-  cleanupMs: 5_000,
-  globalMs: 90_000
+  acknowledgementMs: 10_000,
+  closeMs: 3_000,
+  cleanupMs: 3_000,
+  globalMs: 55_000
 };
 
 export class WriteToolProbeError extends Error {
@@ -80,6 +80,9 @@ function timeoutFor(stage: WriteToolProbeStage, timeouts: WriteToolProbeTimeouts
 }
 
 function timeoutCode(stage: WriteToolProbeStage): WriteToolProbeErrorCode {
+  if (stage === "creating_ephemeral_token") return "token_creation_failed";
+  if (stage === "opening_socket") return "socket_open_failed";
+  if (stage === "waiting_for_setup_complete") return "setup_timeout";
   if (stage === "waiting_for_write_tool_call") return "write_tool_timeout";
   if (stage === "waiting_for_permission_acknowledgement") return "permission_acknowledgement_timeout";
   return "unknown_error";
@@ -94,6 +97,8 @@ function normalizeError(error: unknown, stage: WriteToolProbeStage): WriteToolPr
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (/429|resource_exhausted|rate.?limit/.test(message)) return new WriteToolProbeError(stage, "rate_limited");
   if (/provider|gemini live socket/.test(message)) return new WriteToolProbeError(stage, "provider_error");
+  if (stage === "creating_ephemeral_token") return new WriteToolProbeError(stage, "token_creation_failed");
+  if (stage === "opening_socket") return new WriteToolProbeError(stage, "socket_open_failed");
   if (stage === "sending_write_request") return new WriteToolProbeError(stage, "write_prompt_dispatch_failed");
   if (stage === "sending_confirmation_required_response") return new WriteToolProbeError(stage, "tool_response_failed");
   return new WriteToolProbeError(stage, "unknown_error");
@@ -101,7 +106,10 @@ function normalizeError(error: unknown, stage: WriteToolProbeStage): WriteToolPr
 
 export async function runWriteToolProbe(
   driver: WriteToolProbeDriver,
-  options: { timeouts?: Partial<WriteToolProbeTimeouts> } = {}
+  options: {
+    timeouts?: Partial<WriteToolProbeTimeouts>; signal?: AbortSignal;
+    onStage?: (stage: WriteToolProbeStage) => void; onStageComplete?: (stage: WriteToolProbeStage) => void;
+  } = {}
 ): Promise<WriteToolProbeResult> {
   const timeouts = { ...WRITE_TOOL_PROBE_TIMEOUTS, ...options.timeouts };
   const startedAt = Date.now();
@@ -113,18 +121,25 @@ export async function runWriteToolProbe(
   let cleanupCompleted = false;
   let globalReject!: (error: WriteToolProbeError) => void;
   const globalTimeout = new Promise<never>((_, reject) => { globalReject = reject; });
-  const watchdog = setTimeout(() => globalReject(new WriteToolProbeError(activeStage, "global_timeout")), timeouts.globalMs);
+  const watchdog = setTimeout(() => globalReject(new WriteToolProbeError(activeStage, "child_global_timeout")), timeouts.globalMs);
   timers.add(watchdog);
+  const aborted = new Promise<never>((_, reject) => {
+    const fail = () => reject(new WriteToolProbeError(activeStage, "child_global_timeout"));
+    if (options.signal?.aborted) fail(); else options.signal?.addEventListener("abort", fail, { once: true });
+  });
 
   const stage = async <T>(name: WriteToolProbeStage, operation: () => Promise<T>, includeGlobal = true) => {
     activeStage = name;
+    options.onStage?.(name);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new WriteToolProbeError(name, timeoutCode(name))), timeoutFor(name, timeouts));
       timers.add(timer);
     });
     try {
-      return await Promise.race(includeGlobal ? [operation(), timeout, globalTimeout] : [operation(), timeout]);
+      const value = await Promise.race(includeGlobal ? [operation(), timeout, globalTimeout, aborted] : [operation(), timeout, aborted]);
+      options.onStageComplete?.(name);
+      return value;
     } catch (error) {
       throw normalizeError(error, name);
     } finally {

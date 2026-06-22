@@ -20,6 +20,12 @@ export type WriteToolProbeStage =
   | "cleanup";
 
 export type WriteToolProbeErrorCode =
+  | "child_start_failed"
+  | "runner_load_failed"
+  | "probe_not_idle_before_write_request"
+  | "token_creation_failed"
+  | "socket_open_failed"
+  | "setup_timeout"
   | "write_prompt_dispatch_failed"
   | "write_tool_timeout"
   | "model_spoke_instead_of_tool"
@@ -37,6 +43,10 @@ export type WriteToolProbeErrorCode =
   | "rate_limited"
   | "socket_closed_early"
   | "global_timeout"
+  | "child_global_timeout"
+  | "parent_watchdog_timeout"
+  | "child_exit_without_terminal_record"
+  | "invalid_event_protocol"
   | "unknown_error";
 
 export type SanitizedWriteProbeEvent =

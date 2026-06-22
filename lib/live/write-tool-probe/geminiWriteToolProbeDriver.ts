@@ -25,6 +25,7 @@ import type {
   WriteToolProbeDriver,
   WriteToolProbeErrorCode
 } from "./writeToolProbeTypes";
+import type { WriteProbeLifecycleEvent } from "./probeEventProtocol";
 
 class Deferred<T> {
   readonly promise: Promise<T>;
@@ -70,6 +71,18 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
   private socketClosed = false;
   private cleanupCompleted = false;
 
+  constructor(
+    private readonly signal?: AbortSignal,
+    private readonly onLifecycle?: (event: WriteProbeLifecycleEvent, toolName?: string) => void,
+    private readonly onFatal?: () => void
+  ) {
+    this.signal?.addEventListener("abort", () => {
+      this.acceptEvents = false;
+      this.rejectPending(probeError("child_global_timeout", "Write-tool probe aborted"));
+      if (this.session && !this.closeRequested) { this.closeRequested = true; this.session.close(); }
+    }, { once: true });
+  }
+
   private setupComplete = new Deferred<void>();
   private writeToolCall = new Deferred<void>();
   private permissionAcknowledgement = new Deferred<void>();
@@ -100,7 +113,9 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
 
   async createEphemeralToken() {
     const minted = await mintGeminiLiveWriteToolProbeToken();
+    if (this.signal?.aborted) throw probeError("child_global_timeout", "Probe aborted during token creation");
     this.token = minted.token;
+    this.onLifecycle?.("token_created");
   }
 
   async openSocket() {
@@ -109,11 +124,12 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
     this.session = await client.live.connect({
       model: this.configuration.model,
       callbacks: {
-        onopen: () => this.record("socket_open"),
+        onopen: () => { this.record("socket_open"); this.onLifecycle?.("socket_open"); },
         onmessage: (message) => {
           if (!this.acceptEvents) return;
           if (message.setupComplete) {
             this.record("setup_complete");
+            this.onLifecycle?.("setup_complete");
             this.setupComplete.resolve();
           }
 
@@ -126,6 +142,7 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
                 toolName: call.name || "missing",
                 functionCallCount: functionCalls.length
               });
+              this.onLifecycle?.("tool_call_received", call.name || "missing");
             }
             this.turnActive = false;
             this.writeToolCall.resolve();
@@ -166,12 +183,16 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
           const message = event.message || "Gemini Live provider error";
           const code = /429|resource_exhausted|rate.?limit/i.test(message) ? "rate_limited" : "provider_error";
           this.rejectPending(probeError(code, "Gemini Live provider error"));
+          this.onFatal?.();
         },
         onclose: () => {
           this.socketClosed = true;
           this.record("socket_closed");
           this.closed.resolve();
-          if (!this.closeRequested && this.acceptEvents) this.rejectPending(probeError("socket_closed_early", "Socket closed before probe completion"));
+          if (!this.closeRequested && this.acceptEvents) {
+            this.rejectPending(probeError("socket_closed_early", "Socket closed before probe completion"));
+            this.onFatal?.();
+          }
         }
       },
       config: {
@@ -185,13 +206,14 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
   async waitForSetupComplete() { await this.setupComplete.promise; }
 
   async sendWriteRequest() {
-    if (!this.session || this.turnActive || this.calls.length || this.toolResponseSent) {
-      throw probeError("write_prompt_dispatch_failed", "Write request was not dispatched from an idle turn");
+    if (!this.session || this.turnActive || this.calls.length || this.toolResponseSent || this.acknowledgementText || this.modelOutputBeforeTool) {
+      throw probeError("probe_not_idle_before_write_request", "Write request was not dispatched from an idle turn");
     }
     this.turnActive = true;
     this.writePromptSent = true;
     this.session.sendRealtimeInput(createWriteRequestRealtimeInput());
     this.record("write_prompt_sent");
+    this.onLifecycle?.("write_prompt_sent");
   }
 
   async waitForWriteToolCall() {
@@ -228,6 +250,7 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
     this.session.sendToolResponse(createConfirmationRequiredResponse(this.call));
     this.toolResponseSent = true;
     this.turnActive = true;
+    this.onLifecycle?.("tool_response_sent");
   }
 
   async waitForPermissionAcknowledgement() { await this.permissionAcknowledgement.promise; }
@@ -266,6 +289,7 @@ export class GeminiWriteToolProbeDriver implements WriteToolProbeDriver {
     this.action = undefined;
     this.cleanupCompleted = true;
     this.record("cleanup_complete");
+    this.onLifecycle?.("cleanup_complete");
     return { socketClosed: this.socketClosed, cleanupCompleted: true };
   }
 
