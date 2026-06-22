@@ -1,5 +1,39 @@
 export const LIVE_INPUT_SAMPLE_RATE = 16_000;
 export const LIVE_OUTPUT_SAMPLE_RATE = 24_000;
+export const LIVE_INPUT_CHUNK_BYTES = LIVE_INPUT_SAMPLE_RATE * 2 * 0.02;
+
+export function canCompleteLivePlayback(generationComplete: boolean, pendingSchedules: number, activeSources: number) {
+  return generationComplete && pendingSchedules === 0 && activeSources === 0;
+}
+
+export class PcmChunkAccumulator {
+  private pending = new Uint8Array(0);
+
+  constructor(private readonly chunkBytes = LIVE_INPUT_CHUNK_BYTES) {}
+
+  push(bytes: Uint8Array) {
+    const combined = new Uint8Array(this.pending.byteLength + bytes.byteLength);
+    combined.set(this.pending);
+    combined.set(bytes, this.pending.byteLength);
+    const chunks: Uint8Array[] = [];
+    let offset = 0;
+    while (combined.byteLength - offset >= this.chunkBytes) {
+      chunks.push(combined.slice(offset, offset + this.chunkBytes));
+      offset += this.chunkBytes;
+    }
+    this.pending = combined.slice(offset);
+    return chunks;
+  }
+
+  flush() {
+    const remainder = this.pending;
+    this.pending = new Uint8Array(0);
+    return remainder;
+  }
+
+  clear() { this.pending = new Uint8Array(0); }
+  get size() { return this.pending.byteLength; }
+}
 
 export function resampleFloat32(input: Float32Array, sourceRate: number, targetRate = LIVE_INPUT_SAMPLE_RATE) {
   if (sourceRate === targetRate) return input;

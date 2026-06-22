@@ -3,6 +3,7 @@ import type { LiveProvider, LiveProviderEvent, LiveTokenResponse, LiveToolCall }
 export class MockLiveProvider implements LiveProvider {
   events: LiveProviderEvent[] = [];
   audio: string[] = [];
+  text: string[] = [];
   context: string[] = [];
   results: Array<{ call: LiveToolCall; result: { ok: boolean; message: string } }> = [];
   closed = false;
@@ -14,6 +15,7 @@ export class MockLiveProvider implements LiveProvider {
   }
   emit(event: LiveProviderEvent) { this.events.push(event); this.listener?.(event); }
   sendAudio(data: string) { this.audio.push(data); }
+  sendText(text: string) { this.text.push(text); }
   sendContextDelta(delta: string) { this.context.push(delta); }
   sendToolResult(call: LiveToolCall, result: { ok: boolean; message: string }) { this.results.push({ call, result }); }
   endAudio() { /* deterministic no-op */ }

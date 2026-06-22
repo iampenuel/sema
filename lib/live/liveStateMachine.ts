@@ -46,7 +46,9 @@ export function liveStateReducer(state: LiveRuntimeState, action: LiveStateActio
     case "permission_resolved": return { ...state, status: "listening", pendingAction: undefined };
     case "transcript": {
       const previous = state.transcript[state.transcript.length - 1];
-      const transcript = !action.line.final && previous && previous.role === action.line.role && !previous.final
+      const transcript = previous && previous.role === action.line.role && previous.text === action.line.text
+        ? [...state.transcript.slice(0, -1), action.line]
+        : !action.line.final && previous && previous.role === action.line.role && !previous.final
         ? [...state.transcript.slice(0, -1), action.line]
         : [...state.transcript, action.line].slice(-40);
       return { ...state, transcript };

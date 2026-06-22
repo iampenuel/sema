@@ -1,9 +1,10 @@
 "use client";
 
-import { GoogleGenAI, Modality, type Session } from "@google/genai";
+import { ActivityHandling, EndSensitivity, GoogleGenAI, Modality, StartSensitivity, type Session } from "@google/genai";
 import type { LiveProvider, LiveProviderEvent, LiveTokenResponse, LiveToolCall } from "../liveTypes";
 import { classifyLiveError } from "../liveErrors";
 import { LIVE_FUNCTION_DECLARATIONS } from "../liveTools";
+import { LIVE_CONTEXT_WINDOW_COMPRESSION } from "../liveConfigCore";
 
 export class GeminiLiveProvider implements LiveProvider {
   private session?: Session;
@@ -36,14 +37,29 @@ export class GeminiLiveProvider implements LiveProvider {
             if (call.id && call.name) onEvent({ type: "tool_call", call: { id: call.id, name: call.name, args: call.args ?? {} } });
           }
           if (message.toolCallCancellation?.ids?.length) onEvent({ type: "interrupted" });
+          if (message.serverContent?.generationComplete) onEvent({ type: "generation_complete" });
           if (message.serverContent?.turnComplete) onEvent({ type: "turn_complete" });
         }
       },
-      config: { responseModalities: [Modality.AUDIO], tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }] }
+      config: {
+        responseModalities: [Modality.AUDIO],
+        contextWindowCompression: LIVE_CONTEXT_WINDOW_COMPRESSION,
+        realtimeInputConfig: {
+          activityHandling: ActivityHandling.NO_INTERRUPTION,
+          automaticActivityDetection: {
+            startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+            prefixPaddingMs: 100,
+            silenceDurationMs: 350
+          }
+        },
+        tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }]
+      }
     });
   }
 
   sendAudio(data: string) { this.session?.sendRealtimeInput({ audio: { data, mimeType: "audio/pcm;rate=16000" } }); }
+  sendText(text: string) { if (text) this.session?.sendRealtimeInput({ text }); }
   sendContextDelta(delta: string) { if (delta) this.session?.sendClientContent({ turns: [{ role: "user", parts: [{ text: `[Sema workspace update]\n${delta}` }] }], turnComplete: false }); }
   sendToolResult(call: LiveToolCall, result: { ok: boolean; message: string }) { this.session?.sendToolResponse({ functionResponses: [{ id: call.id, name: call.name, response: result.ok ? { output: result.message } : { error: result.message } }] }); }
   endAudio() { this.session?.sendRealtimeInput({ audioStreamEnd: true }); }

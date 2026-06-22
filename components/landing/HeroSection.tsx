@@ -23,7 +23,7 @@ export function HeroSection() {
           </Link>
           <Link href="/safety" className="inline-flex min-h-12 items-center justify-center gap-2 px-4 py-3 font-semibold text-sema-blue-dark transition hover:text-sema-blue">
             <ShieldCheck className="h-4 w-4 text-sema-green" aria-hidden="true" />
-            View Safety &amp; Limitations
+            View Privacy &amp; Safety
           </Link>
         </div>
       </div>

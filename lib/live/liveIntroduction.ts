@@ -1,0 +1,3 @@
+export const LIVE_INTRODUCTION = "Hi, I'm Sema. I'm here to help you organize what you've noticed about your health or an injury, in your own words, so you can review it and prepare for a conversation with a clinician. I don't diagnose or give medical advice. You can speak to me to move around this page—no typing or scrolling needed. Try saying, 'Open the Story folder,' or simply tell me what you'd like to work on.";
+
+export const LIVE_INTRODUCTION_PROMPT = `Say exactly this introduction, then listen for the user: ${JSON.stringify(LIVE_INTRODUCTION)} Do not add anything and do not call a tool.`;

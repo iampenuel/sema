@@ -19,12 +19,14 @@ import { AgentMessageList } from "./AgentMessageList";
 import { AgentPermissionPrompt } from "./AgentPermissionPrompt";
 import { LiveAgentControls } from "@/components/live/LiveAgentControls";
 import type { SemaLiveController } from "@/hooks/useSemaLiveSession";
+import { LIVE_INTRODUCTION } from "@/lib/live/liveIntroduction";
 
 const starterPrompts = [
+  "Show me all folders.",
+  "Open the Story folder.",
   "Summarize my session so far.",
   "What details are missing?",
   "Prepare my packet.",
-  "Take me to the body map.",
   "Record an audio signal.",
   "Help me make questions for a clinician.",
   "Read the safety note."
@@ -38,7 +40,7 @@ export function SemaAgentPanel({
   rail = false
 }: {
   session: SemaSession;
-  onExecuteAction: (action: AgentAction) => string;
+  onExecuteAction: (action: AgentAction) => Promise<string>;
   onSafetyFlags?: (flags: SafetyFlag[]) => void;
   live?: SemaLiveController;
   rail?: boolean;
@@ -53,11 +55,11 @@ export function SemaAgentPanel({
     setMessages((current) => [...current, { id: `${role}-${Date.now()}-${current.length}`, role, content }]);
   }
 
-  function handleAction(action: AgentAction) {
+  async function handleAction(action: AgentAction) {
     const decision = evaluatePermission(action);
 
     if (decision.outcome === "not_required") {
-      const result = onExecuteAction(action);
+      const result = await onExecuteAction(action);
       addMessage("agent", result);
       return;
     }
@@ -83,14 +85,14 @@ export function SemaAgentPanel({
     const voiceIntent = routeLocalVoiceIntent(message);
     if (voiceIntent) {
       addMessage("agent", voiceIntent.reply);
-      voiceIntent.proposedActions.forEach(handleAction);
+      for (const action of voiceIntent.proposedActions) await handleAction(action);
       return;
     }
     const exact = routeExactAgentIntent(message, context);
     if (exact) {
       const validated = validateAgentProposal(exact);
       addMessage("agent", exact.reply);
-      validated.actions.forEach(handleAction);
+      for (const action of validated.actions) await handleAction(action);
       return;
     }
 
@@ -100,14 +102,14 @@ export function SemaAgentPanel({
       const response = await requestAgentProposal({ message, context });
       addMessage("agent", response.reply);
       if (response.safetyFlags.length) onSafetyFlags?.(response.safetyFlags);
-      response.proposedActions.forEach(handleAction);
+      for (const action of response.proposedActions) await handleAction(action);
       setFallbackNotice(response.fallbackNotice ?? null);
       setRequestFailed(Boolean(response.fallbackNotice));
     } catch {
       const response = routeLocalIntent(message, session, "/session");
       addMessage("agent", response.reply);
       if (response.safetyFlags.length) onSafetyFlags?.(response.safetyFlags);
-      response.proposedActions.forEach(handleAction);
+      for (const action of response.proposedActions) await handleAction(action);
       setFallbackNotice("AI enhancement is unavailable right now. Sema is continuing in local mode, and your saved session data is still available.");
       setRequestFailed(true);
     } finally {
@@ -115,10 +117,11 @@ export function SemaAgentPanel({
     }
   }
 
-  function confirmPending() {
+  async function confirmPending() {
     if (!pending) return;
-    const result = onExecuteAction(pending.action);
+    const action = pending.action;
     setPending(null);
+    const result = await onExecuteAction(action);
     addMessage("agent", result);
   }
 
@@ -152,7 +155,7 @@ export function SemaAgentPanel({
 
       <div className="mt-3 rounded-md border border-sema-border bg-white p-3 text-sm leading-5 text-sema-slate shadow-sm">
         <p className="text-[10px] font-bold text-sema-blue">SEMA</p>
-        <p className="mt-1">Hi, I&apos;m Sema. I can organize patient-provided observations, open signal folders, prepare the packet after permission, and keep the safety boundary visible.</p>
+        <p className="mt-1">{LIVE_INTRODUCTION}</p>
       </div>
 
       <div className="mt-3">
@@ -183,7 +186,7 @@ export function SemaAgentPanel({
           <AgentPermissionPrompt
             action={pending.action}
             decision={pending.decision}
-            onConfirm={confirmPending}
+            onConfirm={() => { void confirmPending(); }}
             onCancel={() => {
               setPending(null);
               addMessage("agent", "Cancelled.");

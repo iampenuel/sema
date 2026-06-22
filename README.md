@@ -4,9 +4,9 @@ This folder contains the planning and implementation context for building **Sema
 
 Sema helps users capture health-related observations before care begins and package them into a structured evidence packet. Sema is **not** a diagnostic, treatment, or triage tool.
 
-## Recommended first step
+## Current implementation
 
-Open `prompts/codex-phase-1-session-prompt.md` and paste it into your first Codex session.
+The repository now contains the Phase 1 workspace plus the stabilized Sema Live, permission-gated packet workflow, browser-local persistence, and direct packet-only PDF export. See `docs/project-status-2026-06-21.md` for the verified scope and current limitations. The files under `prompts/` and the numbered planning documents preserve the original build direction and may describe Live voice as a later phase.
 
 ## Folder contents
 
@@ -26,7 +26,7 @@ references/
   layout-inspo-alethia-style.png
 ```
 
-## Core build direction
+## Current product boundaries
 
 Build Sema as:
 
@@ -34,6 +34,7 @@ Build Sema as:
 - `/session` main guided workspace.
 - Left Sema agent/session rail.
 - Main workspace with progressive evidence-capture cards.
-- Story, body map, audio, packet preview, and page-aware text agent.
-- No live voice in Phase 1.
-- No auth, database, EHR integration, real patient storage, diagnosis, treatment, triage, or medical-device claims.
+- Story, body/location, audio, packet preview, and page-aware text and Gemini Live agents.
+- Browser-local session persistence with an explicit clear-session control; there is no account-based cloud clinical record.
+- No authentication, EHR integration, diagnosis, treatment, triage, clinical-validation, HIPAA-compliance, or medical-device claims.
+- No photo capture or intimate-content protection in this checkpoint.

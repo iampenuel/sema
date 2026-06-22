@@ -8,6 +8,7 @@ import type { SemaSessionAction } from "@/lib/sema-session/reducer";
 import type { DraftCapture, SemaSession, SignalFolderId } from "@/lib/sema-session/types";
 import { SEMAPHASE_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
 import type { AgentAction } from "@/lib/agent/agentTypes";
+import { downloadEvidencePacketPdf } from "@/lib/packet/pdfExport";
 
 type Handlers = {
   dispatch: Dispatch<SemaSessionAction>;
@@ -35,7 +36,7 @@ export function useAgentActions(handlers: Handlers) {
     window.setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
-  function execute(action: AgentAction) {
+  async function execute(action: AgentAction): Promise<string> {
     const session = handlers.getSession();
 
     switch (action.type) {
@@ -48,6 +49,9 @@ export function useAgentActions(handlers: Handlers) {
         const labels: Record<SignalFolderId, string> = { story: "Story", body_location: "Body/Location", audio: "Audio", motion_visual: "Motion/Visual", packet: "Evidence Packet" };
         return `Opened the ${labels[folder]} Signal Folder.`;
       }
+      case "showSignalFolderOverview":
+        document.getElementById("signal-folders-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return "Returned to the signal folder overview.";
       case "readSignalFolder": {
         const folder = action.payload?.folder as SignalFolderId | undefined;
         return folder ? getFolderReadout(session, folder) : "I could not identify that folder.";
@@ -108,8 +112,12 @@ export function useAgentActions(handlers: Handlers) {
       }
       case "exportPacketPdf":
         if (!session.packetDraft) return "Prepare a packet draft before exporting.";
-        window.print();
-        return "The browser print/export dialog has opened.";
+        try {
+          const filename = await downloadEvidencePacketPdf(session.packetDraft);
+          return `The evidence packet PDF was downloaded as ${filename}.`;
+        } catch {
+          return "I could not create the PDF. Your packet is still available in this browser.";
+        }
       case "clearSession":
         handlers.dispatch({ type: "replace_session", session: createEmptySession() });
         handlers.onNavigate("story");

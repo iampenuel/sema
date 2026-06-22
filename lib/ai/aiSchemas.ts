@@ -23,7 +23,7 @@ export const StoryExtractionDraftSchema = z.object({
   safetyFlags: z.array(SafetyFlagTypeSchema.exclude(["privacy_warning"])).max(10)
 });
 
-export const AgentActionTypeSchema = z.enum(["openSignalFolder", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder", "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket"]);
+export const AgentActionTypeSchema = z.enum(["openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder", "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket"]);
 
 export const AgentActionProposalSchema = z.object({
   type: AgentActionTypeSchema,

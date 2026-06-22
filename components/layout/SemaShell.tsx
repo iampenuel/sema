@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Home, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 export function SemaShell({
   children,
@@ -25,7 +25,7 @@ export function SemaShell({
               <>
                 <Link href="#about" className="hidden font-medium transition hover:text-sema-blue md:block">About</Link>
                 <Link href="#how-it-works" className="hidden font-medium transition hover:text-sema-blue md:block">How it Works</Link>
-                <Link href="/safety" className="hidden font-medium transition hover:text-sema-blue sm:block">Safety</Link>
+                <Link href="/safety" className="hidden font-medium transition hover:text-sema-blue sm:block">Privacy &amp; Safety</Link>
                 <Link href="/session" className="rounded-md border border-sema-border bg-sema-pale/60 px-3 py-2 font-semibold text-sema-blue-dark transition hover:border-sema-blue/40 hover:bg-sema-pale">Start Session</Link>
               </>
             ) : session ? (
@@ -33,11 +33,7 @@ export function SemaShell({
                 <span className="hidden font-semibold text-sema-blue-dark sm:inline">Session</span>
                 <Link href="/safety" className="inline-flex items-center gap-1.5 font-medium transition hover:text-sema-blue">
                   <ShieldCheck className="h-4 w-4 text-sema-green" aria-hidden="true" />
-                  Safety
-                </Link>
-                <Link href="/" className="inline-flex items-center gap-1.5 rounded-md border border-sema-border bg-white px-3 py-2 font-semibold text-sema-blue-dark transition hover:bg-sema-pale">
-                  <Home className="h-4 w-4" aria-hidden="true" />
-                  <span className="hidden sm:inline">Home</span>
+                  Privacy &amp; Safety
                 </Link>
               </>
             ) : (
@@ -45,7 +41,7 @@ export function SemaShell({
                 <span className="hidden rounded-full border border-sema-border bg-white px-3 py-1.5 sm:inline-flex">{status}</span>
                 <Link href="/safety" className="inline-flex items-center gap-2 rounded-full border border-sema-border bg-white px-3 py-1.5 font-medium text-ink hover:border-sema-blue/40">
                   <ShieldCheck className="h-4 w-4 text-sema-green" aria-hidden="true" />
-                  Safety
+                  Privacy &amp; Safety
                 </Link>
               </>
             )}

@@ -2,6 +2,7 @@ import type { ConcernType, FolderStatus, SafetyFlag, SignalFolderId } from "@/li
 
 export type AgentActionType =
   | "openSignalFolder"
+  | "showSignalFolderOverview"
   | "readSignalFolder"
   | "readCurrentPage"
   | "readSafetyNote"

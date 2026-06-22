@@ -42,7 +42,7 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
           <p className="mt-1 text-sm text-muted">Generated {new Date(packet.generatedAt).toLocaleString()}</p>
           <p className="mt-1 text-sm text-muted">Concern type: {packet.concernType ? concernTypeLabels[packet.concernType] : "Not selected"}</p>
         </div>
-        <PdfExportButton />
+        <PdfExportButton packet={packet} />
       </div>
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -107,7 +107,7 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
         <PacketSection title="Safety note">
           <p className="flex gap-2"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-sema-green" aria-hidden="true" />{packet.safetyNote}</p>
         </PacketSection>
-        <PacketSection title="Limitations">
+        <PacketSection title="Important disclaimers">
           <ul className="mt-2 space-y-1">
             {packet.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
           </ul>

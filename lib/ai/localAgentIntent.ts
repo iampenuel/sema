@@ -16,6 +16,6 @@ export function routeExactAgentIntent(message: string, context: AgentContextSnap
   if (/^(summarize my session( so far)?|generate summary|organize my story)$/.test(lower)) return context.hasStory ? proposal("I can draft an organized summary after permission.", "generateStorySummary") : { reply: "Add patient-provided story text before generating a summary.", proposedActions: [], safetyDisposition: "allowed", safetyFlags: [], requiresReview: false };
   if (/^(prepare my packet|make packet|generate evidence packet)$/.test(lower)) return proposal("I can prepare the packet after permission.", "prepareEvidencePacket");
   if (/^(clear (the )?session|delete everything|start over)$/.test(lower)) return proposal("I can clear this browser-local session after explicit confirmation.", "clearSession");
-  if (/^(download (the )?packet|export (the )?packet|export pdf)$/.test(lower)) return proposal("I can open export after explicit confirmation.", "exportPacketPdf");
+  if (/^(download (the )?packet|export (the )?packet|export pdf)$/.test(lower)) return proposal("I can download a packet-only PDF after explicit confirmation.", "exportPacketPdf");
   return null;
 }

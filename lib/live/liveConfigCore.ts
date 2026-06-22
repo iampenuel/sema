@@ -2,6 +2,11 @@ export type LiveEnvironment = Record<string, string | undefined>;
 
 export const DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview";
 export const DEFAULT_LIVE_VOICE = "Kore";
+export const LIVE_CONTEXT_WINDOW_COMPRESSION = { slidingWindow: {} } as const;
+
+export function liveConnectionRolloverDelayMs(maxSessionMinutes: number) {
+  return Math.max(30_000, maxSessionMinutes * 60_000 - 60_000);
+}
 
 function enabled(value: string | undefined, fallback = false) {
   return value === undefined ? fallback : value === "true";

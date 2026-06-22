@@ -34,6 +34,10 @@ export function routeLocalIntent(message: string, session: SemaSession, currentR
   const voice = routeLocalVoiceIntent(message);
   if (voice) return voice;
 
+  if (/\b(close (?:the )?folder|back to (?:the )?folders?|folder (?:overview|section)|show (?:me )?(?:all )?(?:the )?folders?)\b/.test(lower)) {
+    return { reply: "I can take you back to the signal folder overview.", proposedActions: [createAgentAction("showSignalFolderOverview")], safetyFlags: [] };
+  }
+
   const readMatch = lower.match(/read (?:the )?(story|body(?: map)?|audio|motion|visual|packet)(?: folder| section)?/);
   if (readMatch) {
     const token = readMatch[1];
@@ -63,7 +67,7 @@ export function routeLocalIntent(message: string, session: SemaSession, currentR
   if (lower.includes("prepare") || lower.includes("make packet") || lower.includes("generate evidence packet")) {
     return { reply: "I can prepare an evidence packet from approved and saved signal folders after you confirm.", proposedActions: [createAgentAction("prepareEvidencePacket")], safetyFlags: [] };
   }
-  if (lower.includes("download") || lower.includes("export") || lower.includes("pdf")) return { reply: "I can open the packet export flow after explicit confirmation.", proposedActions: [createAgentAction("exportPacketPdf")], safetyFlags: [] };
+  if (lower.includes("download") || lower.includes("export") || lower.includes("pdf")) return { reply: "I can download a packet-only PDF after explicit confirmation.", proposedActions: [createAgentAction("exportPacketPdf")], safetyFlags: [] };
   if (lower.includes("clear session") || lower.includes("delete everything") || lower.includes("start over")) return { reply: "I can clear this browser-local session after explicit confirmation.", proposedActions: [createAgentAction("clearSession")], safetyFlags: [] };
 
   return {

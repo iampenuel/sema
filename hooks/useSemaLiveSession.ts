@@ -5,17 +5,19 @@ import type { AgentAction } from "@/lib/agent/agentTypes";
 import { evaluatePermission } from "@/lib/agent/permissionGate";
 import type { SemaSession } from "@/lib/sema-session/types";
 import type { SafetyFlag } from "@/lib/sema-session/types";
-import { base64ToPcm16, bytesToBase64, float32ToPcm16, LIVE_OUTPUT_SAMPLE_RATE, resampleFloat32 } from "@/lib/live/liveAudio";
+import { base64ToPcm16, bytesToBase64, canCompleteLivePlayback, float32ToPcm16, LIVE_OUTPUT_SAMPLE_RATE, PcmChunkAccumulator, resampleFloat32 } from "@/lib/live/liveAudio";
 import { buildLiveSessionContext, diffLiveSessionContext, type LiveSessionContext } from "@/lib/live/buildLiveSessionContext";
 import { GeminiLiveProvider } from "@/lib/live/providers/geminiLiveProvider";
+import { liveConnectionRolloverDelayMs } from "@/lib/live/liveConfigCore";
 import { LIVE_SAFE_REDIRECT, screenLiveInput, screenLiveOutput } from "@/lib/live/liveSafety";
 import { initialLiveState, liveStateReducer } from "@/lib/live/liveStateMachine";
 import { validateLiveToolCall } from "@/lib/live/liveTools";
 import type { LiveProvider, LiveProviderEvent, LivePublicStatus, LiveTokenResponse, LiveTranscriptLine, LiveToolCall } from "@/lib/live/liveTypes";
+import { LIVE_INTRODUCTION_PROMPT } from "@/lib/live/liveIntroduction";
 
 type Options = {
   session: SemaSession;
-  executeAction: (action: AgentAction) => string;
+  executeAction: (action: AgentAction) => Promise<string>;
   onSafetyFlags: (flags: SafetyFlag[]) => void;
   providerFactory?: () => LiveProvider;
 };
@@ -39,15 +41,22 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
   const outputContextRef = useRef<AudioContext | undefined>(undefined);
   const workletRef = useRef<AudioWorkletNode | undefined>(undefined);
   const processorRef = useRef<ScriptProcessorNode | undefined>(undefined);
+  const inputChunkerRef = useRef(new PcmChunkAccumulator());
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const playbackChainRef = useRef<Promise<void>>(Promise.resolve());
+  const playbackEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingPlaybackSchedulesRef = useRef(0);
   const outputTimeRef = useRef(0);
   const turnAudioRef = useRef<Array<{ data: string; generation: number }>>([]);
   const turnTextRef = useRef("");
+  const inputDispositionRef = useRef<"pending" | "safe" | "unsafe">("pending");
+  const generationCompleteRef = useRef(false);
   const sessionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const speechFramesRef = useRef(0);
+  const rollingOverRef = useRef(false);
   const awaitingProviderInterruptRef = useRef(false);
   const locallyInterruptedRef = useRef(false);
   const pendingCallRef = useRef<LiveToolCall | undefined>(undefined);
+  const resolvingPendingRef = useRef(false);
   const unsafeTurnRef = useRef(false);
 
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -64,6 +73,8 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
   }, []);
 
   const stopPlayback = useCallback(() => {
+    if (playbackEndTimerRef.current) clearTimeout(playbackEndTimerRef.current);
+    playbackEndTimerRef.current = undefined;
     for (const source of sourcesRef.current) {
       try { source.stop(); } catch { /* source already ended */ }
     }
@@ -72,9 +83,24 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
     turnAudioRef.current = [];
   }, []);
 
-  const playBufferedTurn = useCallback(async () => {
-    const chunks = turnAudioRef.current;
-    turnAudioRef.current = [];
+  const armPlaybackCompletion = useCallback(() => {
+    if (playbackEndTimerRef.current) clearTimeout(playbackEndTimerRef.current);
+    playbackEndTimerRef.current = undefined;
+    if (pendingPlaybackSchedulesRef.current > 0) return;
+    const context = outputContextRef.current;
+    const remainingMs = context ? Math.max(0, (outputTimeRef.current - context.currentTime) * 1000) : 0;
+    const providerGraceMs = generationCompleteRef.current ? 160 : 2_500;
+    playbackEndTimerRef.current = setTimeout(() => {
+      playbackEndTimerRef.current = undefined;
+      if (pendingPlaybackSchedulesRef.current > 0) return;
+      if (!generationCompleteRef.current && providerGraceMs < 2_500) return;
+      sourcesRef.current.clear();
+      outputTimeRef.current = 0;
+      if (["speaking", "thinking"].includes(stateRef.current.status)) dispatch({ type: "listen" });
+    }, remainingMs + providerGraceMs);
+  }, []);
+
+  const scheduleAudioChunks = useCallback(async (chunks: Array<{ data: string; generation: number }>) => {
     if (!chunks.length || stateRef.current.speakerMuted) return;
     const context = outputContextRef.current ?? new AudioContext();
     outputContextRef.current = context;
@@ -92,26 +118,63 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
       source.start(startAt);
       startAt += buffer.duration;
       sourcesRef.current.add(source);
-      source.onended = () => sourcesRef.current.delete(source);
+      source.onended = () => {
+        sourcesRef.current.delete(source);
+        if (canCompleteLivePlayback(generationCompleteRef.current, pendingPlaybackSchedulesRef.current, sourcesRef.current.size) && stateRef.current.status === "speaking") {
+          if (playbackEndTimerRef.current) clearTimeout(playbackEndTimerRef.current);
+          playbackEndTimerRef.current = undefined;
+          outputTimeRef.current = 0;
+          dispatch({ type: "listen" });
+        }
+      };
     }
     outputTimeRef.current = startAt;
     dispatch({ type: "speak" });
   }, []);
 
-  const finishTurn = useCallback(() => {
+  const queueAudioChunks = useCallback((chunks: Array<{ data: string; generation: number }>) => {
+    if (!chunks.length) return;
+    pendingPlaybackSchedulesRef.current += 1;
+    playbackChainRef.current = playbackChainRef.current.then(() => scheduleAudioChunks(chunks)).finally(() => {
+      pendingPlaybackSchedulesRef.current = Math.max(0, pendingPlaybackSchedulesRef.current - 1);
+      armPlaybackCompletion();
+    }).catch(() => {
+      stopPlayback();
+      dispatch({ type: "error", code: "connection_failed", message: "Sema Live audio playback stopped. Text interaction remains available." });
+    });
+  }, [armPlaybackCompletion, scheduleAudioChunks, stopPlayback]);
+
+  const finalizeTurn = useCallback(() => {
+    generationCompleteRef.current = true;
     const text = turnTextRef.current.trim();
     turnTextRef.current = "";
     const screened = screenLiveOutput(text);
-    if (!text || !screened.safe) {
+    const disposition = inputDispositionRef.current;
+    const buffered = turnAudioRef.current;
+    turnAudioRef.current = [];
+
+    if (text && screened.safe) {
+      dispatch({ type: "transcript", line: transcriptLine("sema", text, true) });
+    }
+
+    if (disposition !== "safe") {
+      if (text && screened.safe) queueAudioChunks(buffered);
+      else {
+        stopPlayback();
+        dispatch({ type: "transcript", line: transcriptLine("system", LIVE_SAFE_REDIRECT) });
+      }
+    } else if (!screened.safe) {
       stopPlayback();
       dispatch({ type: "transcript", line: transcriptLine("system", LIVE_SAFE_REDIRECT) });
-      dispatch({ type: "listen" });
-      return;
     }
-    void playBufferedTurn();
-  }, [playBufferedTurn, stopPlayback]);
 
-  const handleToolCall = useCallback((call: LiveToolCall) => {
+    inputDispositionRef.current = "pending";
+    unsafeTurnRef.current = false;
+    if (canCompleteLivePlayback(generationCompleteRef.current, pendingPlaybackSchedulesRef.current, sourcesRef.current.size) && !buffered.length) dispatch({ type: "listen" });
+    else armPlaybackCompletion();
+  }, [armPlaybackCompletion, queueAudioChunks, stopPlayback]);
+
+  const handleToolCall = useCallback(async (call: LiveToolCall) => {
     const provider = providerRef.current;
     if (unsafeTurnRef.current) {
       provider?.sendToolResult(call, { ok: false, message: "No action is available for a request that crosses Sema's safety boundary." });
@@ -132,7 +195,7 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
       dispatch({ type: "permission", pending: { call, action: validated.action } });
       return;
     }
-    const message = executeRef.current(validated.action);
+    const message = await executeRef.current(validated.action);
     provider?.sendToolResult(call, { ok: true, message });
     dispatch({ type: "transcript", line: transcriptLine("sema", message) });
   }, []);
@@ -140,24 +203,40 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
   const handleProviderEvent = useCallback((event: LiveProviderEvent) => {
     switch (event.type) {
       case "open": dispatch({ type: "connected" }); break;
-      case "close": if (stateRef.current.status !== "ended") dispatch({ type: "error", code: "connection_failed", message: event.reason || "The Live connection closed. Text interaction is still available." }); break;
+      case "close": if (!rollingOverRef.current && stateRef.current.status !== "ended") dispatch({ type: "error", code: "connection_failed", message: event.reason || "The Live connection closed. Text interaction is still available." }); break;
       case "error": dispatch({ type: "error", code: event.code, message: event.message }); break;
-      case "audio": if (!awaitingProviderInterruptRef.current) { turnAudioRef.current.push({ data: event.data, generation: stateRef.current.activeGeneration }); dispatch({ type: "think" }); } break;
+      case "audio": if (!awaitingProviderInterruptRef.current) {
+        const chunk = { data: event.data, generation: stateRef.current.activeGeneration };
+        dispatch({ type: "think" });
+        if (inputDispositionRef.current === "safe") queueAudioChunks([chunk]);
+        else turnAudioRef.current.push(chunk);
+      } break;
       case "input_transcript": {
+        generationCompleteRef.current = false;
         dispatch({ type: "transcript", line: transcriptLine("user", event.text, event.final) });
         if (event.final) {
           const screened = screenLiveInput(event.text);
           if (!screened.safe) {
+            inputDispositionRef.current = "unsafe";
             unsafeTurnRef.current = true;
             onSafetyFlags(screened.flags);
             stopPlayback();
             providerRef.current?.sendContextDelta(`[Safety boundary] Respond exactly with: ${LIVE_SAFE_REDIRECT} Do not call a tool.`);
+          } else {
+            inputDispositionRef.current = "safe";
+            const buffered = turnAudioRef.current;
+            turnAudioRef.current = [];
+            if (buffered.length) queueAudioChunks(buffered);
           }
         }
         break;
       }
-      case "output_transcript": turnTextRef.current = event.text; dispatch({ type: "transcript", line: transcriptLine("sema", event.text, event.final) }); break;
-      case "tool_call": handleToolCall(event.call); break;
+      case "output_transcript": {
+        turnTextRef.current += event.text;
+        if (inputDispositionRef.current === "safe") dispatch({ type: "transcript", line: transcriptLine("sema", turnTextRef.current, event.final) });
+        break;
+      }
+      case "tool_call": generationCompleteRef.current = false; void handleToolCall(event.call); break;
       case "interrupted": {
         stopPlayback();
         awaitingProviderInterruptRef.current = false;
@@ -172,26 +251,26 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
         }
         break;
       }
-      case "turn_complete": finishTurn(); unsafeTurnRef.current = false; break;
+      case "generation_complete": {
+        finalizeTurn();
+        break;
+      }
+      case "turn_complete":
+        if (!generationCompleteRef.current && (turnAudioRef.current.length || turnTextRef.current.trim())) finalizeTurn();
+        break;
     }
-  }, [finishTurn, handleToolCall, onSafetyFlags, stopPlayback]);
+  }, [finalizeTurn, handleToolCall, onSafetyFlags, queueAudioChunks, stopPlayback]);
 
   const sendSamples = useCallback((samples: Float32Array, sourceRate: number) => {
     const current = stateRef.current;
     if (current.microphoneMuted || !providerRef.current) return;
-    let energy = 0;
-    for (const sample of samples) energy += sample * sample;
-    const rms = Math.sqrt(energy / Math.max(1, samples.length));
-    speechFramesRef.current = rms > 0.035 ? speechFramesRef.current + 1 : 0;
-    if (speechFramesRef.current === 2 && current.status === "speaking") {
-      stopPlayback();
-      awaitingProviderInterruptRef.current = true;
-      locallyInterruptedRef.current = true;
-      dispatch({ type: "interrupt" });
-    }
+    // Use reliable half-duplex turn-taking for this phase. Keeping microphone
+    // frames local during playback prevents speaker echo and room noise from
+    // becoming accidental user turns. Listening resumes when playback ends.
+    if (current.status === "speaking") return;
     const pcm = float32ToPcm16(resampleFloat32(samples, sourceRate));
-    providerRef.current.sendAudio(bytesToBase64(pcm));
-  }, [stopPlayback]);
+    for (const chunk of inputChunkerRef.current.push(pcm)) providerRef.current.sendAudio(bytesToBase64(chunk));
+  }, []);
 
   const startMicrophone = useCallback(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
@@ -218,13 +297,19 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
   const cleanup = useCallback(() => {
     if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
     stopPlayback();
+    const remainder = inputChunkerRef.current.flush();
+    if (remainder.byteLength) providerRef.current?.sendAudio(bytesToBase64(remainder));
     providerRef.current?.endAudio();
     providerRef.current?.close();
     providerRef.current = undefined;
     pendingCallRef.current = undefined;
+    resolvingPendingRef.current = false;
     awaitingProviderInterruptRef.current = false;
     locallyInterruptedRef.current = false;
     unsafeTurnRef.current = false;
+    inputDispositionRef.current = "pending";
+    generationCompleteRef.current = false;
+    rollingOverRef.current = false;
     workletRef.current?.disconnect();
     processorRef.current?.disconnect();
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -257,10 +342,45 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
       const firstContext = buildLiveSessionContext(sessionRef.current);
       contextRef.current = firstContext;
       provider.sendContextDelta(diffLiveSessionContext(undefined, firstContext));
-      sessionTimerRef.current = setTimeout(() => {
-        cleanup();
-        dispatch({ type: "error", code: "session_expired", message: "The 10-minute Live session ended. You can continue by text." });
-      }, publicStatus.maxSessionMinutes * 60_000);
+      inputDispositionRef.current = "safe";
+      provider.sendText(LIVE_INTRODUCTION_PROMPT);
+
+      const rollover = async () => {
+        if (["speaking", "thinking", "awaiting_confirmation"].includes(stateRef.current.status)) {
+          sessionTimerRef.current = setTimeout(() => { void rollover(); }, 2_000);
+          return;
+        }
+        try {
+          rollingOverRef.current = true;
+          dispatch({ type: "reconnect" });
+          const rolloverRemainder = inputChunkerRef.current.flush();
+          if (rolloverRemainder.byteLength) providerRef.current?.sendAudio(bytesToBase64(rolloverRemainder));
+          providerRef.current?.endAudio();
+          providerRef.current?.close();
+          providerRef.current = undefined;
+          turnAudioRef.current = [];
+          turnTextRef.current = "";
+          const rolloverNonce = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+          const rolloverResponse = await fetch("/api/ai/live/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nonce: rolloverNonce }) });
+          const rolloverBody = await rolloverResponse.json() as LiveTokenResponse & { error?: string; code?: string };
+          if (!rolloverResponse.ok) throw new Error(rolloverBody.code || rolloverBody.error || "Live token unavailable");
+          dispatch({ type: "connect" });
+          const nextProvider = providerFactory ? providerFactory() : new GeminiLiveProvider();
+          providerRef.current = nextProvider;
+          await nextProvider.connect(rolloverBody, handleProviderEvent);
+          const refreshedContext = buildLiveSessionContext(sessionRef.current);
+          contextRef.current = refreshedContext;
+          nextProvider.sendContextDelta(diffLiveSessionContext(undefined, refreshedContext));
+          rollingOverRef.current = false;
+          dispatch({ type: "transcript", line: transcriptLine("system", "Live connection refreshed. Your saved Sema session remains available.") });
+          sessionTimerRef.current = setTimeout(() => { void rollover(); }, liveConnectionRolloverDelayMs(publicStatus.maxSessionMinutes));
+        } catch {
+          rollingOverRef.current = false;
+          cleanup();
+          dispatch({ type: "error", code: "connection_failed", message: "Sema Live could not refresh its connection. Text interaction remains available." });
+        }
+      };
+      sessionTimerRef.current = setTimeout(() => { void rollover(); }, liveConnectionRolloverDelayMs(publicStatus.maxSessionMinutes));
     } catch (error) {
       cleanup();
       const text = error instanceof Error ? error.message.toLowerCase() : "";
@@ -282,26 +402,43 @@ export function useSemaLiveSession({ session, executeAction, onSafetyFlags, prov
   function requestStart() { dispatch({ type: "request_consent" }); }
   function acceptConsent() { dispatch({ type: "consent" }); void connect(); }
   function declineConsent() { dispatch({ type: "error", code: "consent_declined", message: "Live voice was not started. Text interaction remains available." }); }
-  function confirmPending() {
+  async function confirmPending() {
     const pending = stateRef.current.pendingAction;
-    if (!pending) return;
-    const message = executeRef.current(pending.action);
-    providerRef.current?.sendToolResult(pending.call, { ok: true, message });
-    pendingCallRef.current = undefined;
-    dispatch({ type: "transcript", line: transcriptLine("sema", message) });
-    dispatch({ type: "permission_resolved" });
+    if (!pending || resolvingPendingRef.current) return;
+    resolvingPendingRef.current = true;
+    try {
+      const message = await executeRef.current(pending.action);
+      generationCompleteRef.current = false;
+      providerRef.current?.sendToolResult(pending.call, { ok: true, message });
+      pendingCallRef.current = undefined;
+      dispatch({ type: "transcript", line: transcriptLine("sema", message) });
+      dispatch({ type: "permission_resolved" });
+    } finally {
+      resolvingPendingRef.current = false;
+    }
   }
   function denyPending() {
     const pending = stateRef.current.pendingAction;
-    if (!pending) return;
+    if (!pending || resolvingPendingRef.current) return;
+    generationCompleteRef.current = false;
     providerRef.current?.sendToolResult(pending.call, { ok: false, message: "The user declined this action." });
     pendingCallRef.current = undefined;
     dispatch({ type: "permission_resolved" });
   }
   function end() { cleanup(); dispatch({ type: "end" }); }
   function retry() { if (stateRef.current.reconnectAttempts >= 1) return; dispatch({ type: "reconnect" }); void connect(); }
-  function setMicrophoneMuted(muted: boolean) { streamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !muted; }); dispatch({ type: "mute_microphone", muted }); }
-  function setSpeakerMuted(muted: boolean) { if (muted) stopPlayback(); dispatch({ type: "mute_speaker", muted }); }
+  function setMicrophoneMuted(muted: boolean) {
+    streamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
+    if (muted) inputChunkerRef.current.clear();
+    dispatch({ type: "mute_microphone", muted });
+  }
+  function setSpeakerMuted(muted: boolean) {
+    if (muted) {
+      stopPlayback();
+      if (stateRef.current.status === "speaking") dispatch({ type: "listen" });
+    }
+    dispatch({ type: "mute_speaker", muted });
+  }
 
   return {
     state, publicStatus, requestStart, acceptConsent, declineConsent, confirmPending, denyPending, end, retry,

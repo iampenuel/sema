@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createEmptySession } from "../../sema-session/defaults";
-import { resolveLiveConfig } from "../liveConfigCore";
-import { float32ToPcm16, OrderedPcmQueue, resampleFloat32 } from "../liveAudio";
+import { buildEvidencePacket } from "../../packet/buildPacket";
+import { LIVE_CONTEXT_WINDOW_COMPRESSION, liveConnectionRolloverDelayMs, resolveLiveConfig } from "../liveConfigCore";
+import { canCompleteLivePlayback, float32ToPcm16, LIVE_INPUT_CHUNK_BYTES, OrderedPcmQueue, PcmChunkAccumulator, resampleFloat32 } from "../liveAudio";
 import { buildLiveSessionContext, diffLiveSessionContext } from "../buildLiveSessionContext";
 import { LIVE_TOOL_NAMES, validateLiveToolCall } from "../liveTools";
 import { initialLiveState, liveStateReducer } from "../liveStateMachine";
@@ -29,6 +30,7 @@ import { createFinalResultReporter, exitCodeForSmokeResult, runRealLiveSmoke } f
 import type { RealLiveSmokeStage, RealLiveSmokeStageEvent } from "../real-smoke/realLiveSmokeTypes";
 import { audioBoundaryMessages, createDeterministicPcmFixture, validateModelAudio, validateSyntheticPcm } from "../real-smoke/syntheticPcm";
 import { LIVE_SYSTEM_INSTRUCTION } from "../liveSystemInstruction";
+import { LIVE_INTRODUCTION, LIVE_INTRODUCTION_PROMPT } from "../liveIntroduction";
 import { LIVE_FUNCTION_DECLARATIONS } from "../liveTools";
 import { FakeWriteToolProbeDriver } from "./fakeWriteToolProbeDriver";
 import {
@@ -74,6 +76,17 @@ await test("default model is Gemini Live preview", () => assert.match(resolveLiv
 await test("default voice is Kore", () => assert.equal(resolveLiveConfig({}).voiceName, "Kore"));
 await test("session limit is capped at ten", () => assert.equal(resolveLiveConfig({ SEMA_LIVE_MAX_SESSION_MINUTES: "40" }).maxSessionMinutes, 10));
 await test("session limit has a one-minute floor", () => assert.equal(resolveLiveConfig({ SEMA_LIVE_MAX_SESSION_MINUTES: "0" }).maxSessionMinutes, 1));
+await test("Live connection rolls before its ten-minute boundary", () => assert.equal(liveConnectionRolloverDelayMs(10), 540_000));
+await test("short configured sessions retain a safe rollover floor", () => assert.equal(liveConnectionRolloverDelayMs(1), 30_000));
+await test("long conversations use sliding-window compression", () => assert.deepEqual(LIVE_CONTEXT_WINDOW_COMPRESSION, { slidingWindow: {} }));
+await test("Live introduction explains Sema's purpose and page-aware voice navigation", () => {
+  assert.ok(LIVE_INTRODUCTION.includes("organize what you've noticed"));
+  assert.ok(LIVE_INTRODUCTION.includes("prepare for a conversation with a clinician"));
+  assert.ok(LIVE_INTRODUCTION.includes("I don't diagnose or give medical advice"));
+  assert.ok(LIVE_INTRODUCTION.includes("no typing or scrolling needed"));
+  assert.ok(LIVE_INTRODUCTION.includes("Open the Story folder"));
+  assert.ok(LIVE_INTRODUCTION_PROMPT.includes("Do not add anything and do not call a tool"));
+});
 await test("development token requires key and enablement", () => assert.equal(resolveLiveConfig({ SEMA_LIVE_ENABLED: "true", GEMINI_API_KEY: "secret" }).tokenMintingAllowed, true));
 await test("production token is disabled by default", () => assert.equal(resolveLiveConfig({ SEMA_LIVE_ENABLED: "true", GEMINI_API_KEY: "secret" }, "production").tokenMintingAllowed, false));
 await test("production public-demo flag permits token", () => assert.equal(resolveLiveConfig({ SEMA_LIVE_ENABLED: "true", GEMINI_API_KEY: "secret", SEMA_LIVE_PUBLIC_DEMO_ENABLED: "true" }, "production").tokenMintingAllowed, true));
@@ -95,8 +108,14 @@ await test("transcript clears from memory", () => {
   const withLine = liveStateReducer(initialLiveState, { type: "transcript", line: { id: "1", role: "user", text: "demo", final: true } });
   assert.equal(liveStateReducer(withLine, { type: "clear_transcript" }).transcript.length, 0);
 });
+await test("identical final transcript updates replace partial duplicates", () => {
+  const partial = liveStateReducer(initialLiveState, { type: "transcript", line: { id: "partial", role: "sema", text: "Ready.", final: false } });
+  const final = liveStateReducer(partial, { type: "transcript", line: { id: "final", role: "sema", text: "Ready.", final: true } });
+  assert.equal(final.transcript.length, 1);
+  assert.equal(final.transcript[0].final, true);
+});
 
-await test("all and only approved Live tools are declared", () => assert.deepEqual(LIVE_TOOL_NAMES, ["openSignalFolder", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "readPacketSection", "openVoiceDraftReview"]));
+await test("all and only approved Live tools are declared", () => assert.deepEqual(LIVE_TOOL_NAMES, ["openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "readPacketSection", "exportPacketPdf", "openVoiceDraftReview"]));
 await test("tool declarations do not expose trusted risk", async () => {
   const declarations = (await import("../liveTools")).LIVE_FUNCTION_DECLARATIONS;
   assert.equal(JSON.stringify(declarations).includes("riskLevel"), false);
@@ -108,6 +127,11 @@ await test("Live tools use the token-compatible OpenAPI parameter shape", async 
 await test("navigation tool validates", () => {
   const value = validateLiveToolCall({ id: "1", name: "openSignalFolder", args: { folderId: "audio" } }, session);
   assert.equal(value.ok && value.action.payload?.folder, "audio");
+});
+await test("folder overview navigation validates without parameters", () => {
+  const value = validateLiveToolCall({ id: "overview", name: "showSignalFolderOverview", args: {} }, session);
+  assert.equal(value.ok && value.action.type, "showSignalFolderOverview");
+  assert.equal(value.ok && value.permissionRequired, false);
 });
 await test("unknown tool is rejected", () => assert.equal(validateLiveToolCall({ id: "1", name: "clearSession", args: {} }, session).ok, false));
 await test("unexpected parameters are rejected", () => assert.equal(validateLiveToolCall({ id: "1", name: "readCurrentPage", args: { secret: true } }, session).ok, false));
@@ -125,6 +149,12 @@ await test("summary is ineligible without story", () => assert.equal(validateLiv
 await test("packet is ineligible before approval", () => assert.equal(validateLiveToolCall({ id: "1", name: "prepareEvidencePacket", args: {} }, { ...session, story: { rawText: "demo" } }).ok, false));
 await test("packet is eligible after approval", () => assert.equal(validateLiveToolCall({ id: "1", name: "prepareEvidencePacket", args: {} }, approved).ok, true));
 await test("packet section requires packet", () => assert.equal(validateLiveToolCall({ id: "1", name: "readPacketSection", args: { section: "safety" } }, approved).ok, false));
+await test("Live PDF export requires a prepared packet", () => assert.equal(validateLiveToolCall({ id: "1", name: "exportPacketPdf", args: {} }, approved).ok, false));
+await test("Live PDF export requires visible confirmation", () => {
+  const withPacket = { ...approved, packetDraft: buildEvidencePacket(approved) };
+  const value = validateLiveToolCall({ id: "1", name: "exportPacketPdf", args: {} }, withPacket);
+  assert.equal(value.ok && value.permissionRequired, true);
+});
 await test("voice review cannot start microphone", () => {
   const value = validateLiveToolCall({ id: "1", name: "openVoiceDraftReview", args: { target: "audio" } }, session);
   assert.equal(value.ok && value.action.type, "openVoiceDraftReview");
@@ -156,6 +186,24 @@ await test("neutral model output is allowed", () => assert.equal(screenLiveOutpu
 
 await test("PCM16 is little-endian", () => assert.deepEqual([...float32ToPcm16(new Float32Array([1]))], [255, 127]));
 await test("resampling lowers sample count", () => assert.equal(resampleFloat32(new Float32Array(48), 48_000, 16_000).length, 16));
+await test("microphone transport batches twenty-millisecond PCM chunks", () => {
+  assert.equal(LIVE_INPUT_CHUNK_BYTES, 640);
+  const chunker = new PcmChunkAccumulator();
+  assert.equal(chunker.push(new Uint8Array(200)).length, 0);
+  const chunks = chunker.push(new Uint8Array(1080));
+  assert.deepEqual(chunks.map((chunk) => chunk.byteLength), [640, 640]);
+  assert.equal(chunker.size, 0);
+});
+await test("microphone chunk remainder can be flushed", () => {
+  const chunker = new PcmChunkAccumulator();
+  chunker.push(new Uint8Array(123));
+  assert.equal(chunker.flush().byteLength, 123);
+  assert.equal(chunker.size, 0);
+});
+await test("playback cannot report listening before generation completes", () => assert.equal(canCompleteLivePlayback(false, 0, 0), false));
+await test("playback cannot report listening while audio scheduling is pending", () => assert.equal(canCompleteLivePlayback(true, 1, 0), false));
+await test("playback cannot report listening while a source is active", () => assert.equal(canCompleteLivePlayback(true, 0, 1), false));
+await test("playback reports listening only after generation and audio drain", () => assert.equal(canCompleteLivePlayback(true, 0, 0), true));
 await test("ordered queue drops interrupted generation", () => {
   const queue = new OrderedPcmQueue<string>(); queue.enqueue(0, "old"); queue.enqueue(1, "new");
   assert.equal(queue.shift(1), "new");
@@ -183,8 +231,8 @@ await test("ephemeral token is bounded to ten minutes", () => {
 await test("mock provider captures transport locally", async () => {
   const provider = new MockLiveProvider();
   await provider.connect({ token: "local", expiresAt: new Date().toISOString(), model: "mock", voiceName: "mock" }, () => {});
-  provider.sendAudio("pcm"); provider.sendContextDelta("delta");
-  assert.deepEqual(provider.audio, ["pcm"]); assert.deepEqual(provider.context, ["delta"]);
+  provider.sendAudio("pcm"); provider.sendText("hello"); provider.sendContextDelta("delta");
+  assert.deepEqual(provider.audio, ["pcm"]); assert.deepEqual(provider.text, ["hello"]); assert.deepEqual(provider.context, ["delta"]);
 });
 await test("denied permission returns failure without completion", async () => {
   const provider = new MockLiveProvider();
@@ -203,6 +251,11 @@ await test("tool completion follows a success result", async () => {
   assert.equal(provider.results[0].result.message, "The page was read.");
 });
 await test("no camera or image tools are introduced", () => assert.equal(LIVE_TOOL_NAMES.some((name) => /camera|image|photo/i.test(name)), false));
+await test("Live instruction treats microphone audio as a spoken conversation", () => {
+  assert.match(LIVE_SYSTEM_INSTRUCTION, /real-time spoken audio conversation/);
+  assert.match(LIVE_SYSTEM_INSTRUCTION, /Never claim that you cannot hear/);
+  assert.match(LIVE_SYSTEM_INSTRUCTION, /SEH-mah/);
+});
 
 const diagnosticDependencies = (overrides: Partial<DiagnosticDependencies> = {}): DiagnosticDependencies => ({
   model: "gemini-3.1-flash-live-preview",
@@ -490,7 +543,7 @@ await test("dedicated write probe declares only prepareEvidencePacket", () => {
   assert.equal(WRITE_TOOL_PROBE_DECLARATIONS.length, 1);
   assert.equal(WRITE_TOOL_PROBE_DECLARATIONS[0].name, "prepareEvidencePacket");
 });
-await test("production Live tool allowlist remains unchanged", () => assert.equal(LIVE_FUNCTION_DECLARATIONS.length, 10));
+await test("production Live tool allowlist contains only approved tools", () => assert.equal(LIVE_FUNCTION_DECLARATIONS.length, LIVE_TOOL_NAMES.length));
 await test("test-only write instruction does not replace production instruction", () => {
   assert.notEqual(WRITE_TOOL_PROBE_SYSTEM_INSTRUCTION, LIVE_SYSTEM_INSTRUCTION);
   assert.match(LIVE_SYSTEM_INSTRUCTION, /page-aware evidence organization assistant/);

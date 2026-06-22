@@ -92,11 +92,13 @@ export type LiveProviderEvent =
   | { type: "output_transcript"; text: string; final: boolean }
   | { type: "tool_call"; call: LiveToolCall }
   | { type: "interrupted" }
+  | { type: "generation_complete" }
   | { type: "turn_complete" };
 
 export interface LiveProvider {
   connect(token: LiveTokenResponse, onEvent: (event: LiveProviderEvent) => void): Promise<void>;
   sendAudio(pcmBase64: string): void;
+  sendText(text: string): void;
   sendContextDelta(delta: string): void;
   sendToolResult(call: LiveToolCall, result: { ok: boolean; message: string }): void;
   endAudio(): void;
