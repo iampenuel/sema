@@ -7,7 +7,7 @@ export function getSessionReadiness(session: SemaSession) {
     { id: "summary", label: "Organized summary approved", complete: session.story.summaryStatus === "approved" },
     { id: "body", label: "Body/location observation added", complete: session.bodyLocation.length > 0 },
     { id: "audio", label: "Audio observation added", complete: session.audioSignals.length > 0 },
-    { id: "motion", label: "Motion/visual note optional", complete: session.motionVisualNotes.length > 0, optional: true },
+    { id: "motion", label: "Motion/visual observation optional", complete: session.motionVisualNotes.length > 0 || session.photoObservations.length > 0, optional: true },
     { id: "packet", label: "Packet draft prepared", complete: Boolean(session.packetDraft) },
     { id: "safety", label: "Safety note included", complete: true }
   ];

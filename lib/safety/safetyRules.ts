@@ -63,6 +63,17 @@ const patterns: Array<{
     severity: "blocked",
     message: "Sema cannot interpret body/location notes as proof of injury or diagnosis.",
     terms: [/\bbased on (the )?(map|body map)\b/i, /\bwhat injury\b/i, /\bproof of injury\b/i]
+  },
+  {
+    type: "image_interpretation_request",
+    severity: "blocked",
+    message: "Sema cannot medically analyze or interpret a photo.",
+    terms: [
+      /\bwhat is (this|that) in (the|this|my) (photo|picture|image)\b/i,
+      /\b(photo|picture|image).*(infected|infection|disease|condition|normal|abnormal|serious)\b/i,
+      /\b(does|is).*(photo|picture|image).*(look|show|seem|infected|normal)\b/i,
+      /\b(analy[sz]e|interpret|diagnose|classify).*(photo|picture|image)\b/i
+    ]
   }
 ];
 

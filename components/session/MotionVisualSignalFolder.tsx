@@ -1,9 +1,25 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- approved photos use current-tab blob URLs */
 
-import { Camera, Save } from "lucide-react";
+import { Camera, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { PhotoCapturePanel } from "@/components/photo/PhotoCapturePanel";
+import type { EphemeralPhotoDraft, PhotoObservationMetadata } from "@/lib/photo/types";
 import type { MotionVisualNote } from "@/lib/sema-session/types";
 
-export function MotionVisualSignalFolder({ notes, onSave }: { notes: MotionVisualNote[]; onSave: (note: string) => void }) {
+type Props = {
+  notes: MotionVisualNote[];
+  photos: PhotoObservationMetadata[];
+  photoCaptureOpen: boolean;
+  onOpenPhotoCapture: () => void;
+  onClosePhotoCapture: () => void;
+  onApprovePhoto: (draft: EphemeralPhotoDraft, metadata: PhotoObservationMetadata) => void;
+  onUpdatePhoto: (metadata: PhotoObservationMetadata) => void;
+  onRemovePhoto: (id: string) => void;
+  getRuntimePhoto: (id: string) => EphemeralPhotoDraft | undefined;
+  onSave: (note: string) => void;
+};
+
+export function MotionVisualSignalFolder({ notes, photos, photoCaptureOpen, onOpenPhotoCapture, onClosePhotoCapture, onApprovePhoto, onUpdatePhoto, onRemovePhoto, getRuntimePhoto, onSave }: Props) {
   function handleSubmit(formData: FormData) {
     const note = String(formData.get("motionNote") || "").trim();
     if (note) onSave(note);
@@ -16,12 +32,33 @@ export function MotionVisualSignalFolder({ notes, onSave }: { notes: MotionVisua
         OPTIONAL SIGNAL
       </p>
       <h2 id="motion-title" className="mt-2 text-2xl font-bold text-ink">Motion/Visual Signal Folder</h2>
-      <p className="mt-2 text-sm leading-6 text-sema-slate">Add movement or visual notes. Camera-based motion capture is planned for a later version.</p>
+      <p className="mt-2 text-sm leading-6 text-sema-slate">Add movement or visual notes, or capture a browser-local photo after an on-device privacy check.</p>
 
       <div className="mt-5 rounded-md border border-sema-border bg-sema-pale/50 p-4">
-        <h3 className="font-semibold text-ink">Future motion observation card</h3>
-        <p className="mt-2 text-sm leading-6 text-sema-slate">Phase 1 does not use camera tracking, heat sensing, X-ray-like claims, diagnostic overlays, or Grad-CAM-style visualization.</p>
+        <h3 className="font-semibold text-ink">Privacy-safe photo observation</h3>
+        <p className="mt-2 text-sm leading-6 text-sema-slate">Camera access starts only after you choose Allow camera. Sema checks sampled frames on this device and does not medically analyze the image.</p>
+        <button type="button" onClick={onOpenPhotoCapture} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-md border border-sema-blue bg-white px-4 py-2 text-sm font-semibold text-sema-blue-dark hover:bg-sema-pale"><Camera className="h-4 w-4" aria-hidden="true" />Take a photo</button>
       </div>
+
+      {photoCaptureOpen && <PhotoCapturePanel onApprove={onApprovePhoto} onClose={onClosePhotoCapture} />}
+
+      {photos.length > 0 && <div className="mt-5">
+        <h3 className="text-sm font-semibold text-ink">Approved photo observations</h3>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          {photos.map((photo) => {
+            const runtime = getRuntimePhoto(photo.id);
+            return <article key={photo.id} className="rounded-md border border-sema-border bg-white p-3">
+              {runtime ? <img src={runtime.objectUrl} alt="Patient-provided photo observation" className="aspect-video w-full rounded-md bg-black object-contain" /> : <div className="flex aspect-video items-center justify-center rounded-md bg-sema-pale p-4 text-center text-sm text-sema-slate">Photo was not retained by Sema after the browser session.</div>}
+              <p className="mt-3 flex items-center gap-2 text-xs font-bold text-sema-blue"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Patient-provided photo · Not analyzed for disease</p>
+              <p className="mt-2 text-sm text-sema-slate">{photo.note || "No note added."}</p>
+              {photo.bodyLocation && <p className="mt-1 text-xs text-muted">Body location: {photo.bodyLocation}</p>}
+              <p className="mt-1 text-xs font-semibold text-sema-blue">Photo available in this tab only</p>
+              <label className="mt-3 flex min-h-10 items-center gap-2 text-xs"><input type="checkbox" checked={photo.includeInPacket} onChange={(event) => onUpdatePhoto({ ...photo, includeInPacket: event.target.checked })} />Include in current evidence packet</label>
+              <button type="button" onClick={() => onRemovePhoto(photo.id)} className="mt-2 inline-flex min-h-10 items-center gap-2 rounded-md border border-[#d6a9a9] px-3 text-xs font-semibold text-[#9b4141]"><Trash2 className="h-4 w-4" aria-hidden="true" />Remove photo</button>
+            </article>;
+          })}
+        </div>
+      </div>}
 
       <form action={handleSubmit} className="mt-5">
         <label htmlFor="motion-note" className="text-sm font-semibold text-ink">Movement or visual note</label>

@@ -109,6 +109,7 @@ export function buildEvidencePacket(session: SemaSession, options: PacketBuildOp
     bodyLocationObservations: session.bodyLocation,
     audioSignals: session.audioSignals.map(toPacketAudioSignal),
     motionVisualNotes: session.motionVisualNotes,
+    photoObservations: session.photoObservations,
     missingDetails: Array.from(new Set([...(approvedSummary?.missingDetails ?? []), ...(approvedNarrative?.missingDetails ?? [])])),
     clinicianQuestions: Array.from(new Set([...(approvedSummary?.clinicianQuestions ?? []), ...(approvedNarrative?.clinicianQuestions ?? [])])),
     organizedNarrative: approvedNarrative?.conciseNarrative,

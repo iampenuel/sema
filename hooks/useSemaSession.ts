@@ -18,6 +18,7 @@ import type {
   SignalFolderId,
   StructuredSummary
 } from "@/lib/sema-session/types";
+import type { PhotoObservationMetadata } from "@/lib/photo/types";
 
 const storageKey = "sema-phase-1-session";
 
@@ -49,6 +50,24 @@ export function migrateSession(parsed: StoredSession): SemaSession {
       ? { id: `motion-migrated-${index}`, note: item, createdAt: parsed.updatedAt ?? new Date().toISOString(), source: "patient_stated" as const }
       : item
   );
+  const photoObservations = (parsed.photoObservations ?? []).flatMap((photo): PhotoObservationMetadata[] => {
+    if (!photo || typeof photo !== "object" || !photo.id || !photo.createdAt) return [];
+    return [{
+      id: String(photo.id),
+      createdAt: String(photo.createdAt),
+      width: Number.isFinite(photo.width) ? Number(photo.width) : 0,
+      height: Number.isFinite(photo.height) ? Number(photo.height) : 0,
+      mimeType: String(photo.mimeType || "image/jpeg"),
+      sizeBytes: Number.isFinite(photo.sizeBytes) ? Number(photo.sizeBytes) : 0,
+      note: String(photo.note || ""),
+      bodyLocation: photo.bodyLocation ? String(photo.bodyLocation) : undefined,
+      tags: Array.isArray(photo.tags) ? photo.tags.map(String).slice(0, 10) : [],
+      includeInPacket: photo.includeInPacket === true,
+      source: "patient_camera_capture",
+      privacyGuardStatus: "allowed_on_device",
+      availability: "current_tab_only"
+    }];
+  });
   const summary = parsed.story?.structuredSummary
     ? { ...parsed.story.structuredSummary, source: parsed.story.structuredSummary.source ?? "ai_organized_from_patient_provided_information" as const }
     : undefined;
@@ -63,6 +82,7 @@ export function migrateSession(parsed: StoredSession): SemaSession {
     bodyLocationObservations: storedPacket.bodyLocationObservations ?? storedPacket.bodyMapObservations ?? [],
     audioSignals: (storedPacket.audioSignals ?? []).map((signal, index) => toPacketAudioSignal(sanitizeAudioSignal(signal, index))),
     motionVisualNotes: storedPacket.motionVisualNotes ?? [],
+    photoObservations: storedPacket.photoObservations ?? [],
     missingDetails: storedPacket.missingDetails ?? storedPacket.aiOrganizedSummary?.missingDetails ?? [],
     clinicianQuestions: storedPacket.clinicianQuestions ?? storedPacket.aiOrganizedSummary?.clinicianQuestions ?? [],
     safetyNote: storedPacket.safetyNote ?? "",
@@ -84,6 +104,7 @@ export function migrateSession(parsed: StoredSession): SemaSession {
     bodyLocation,
     audioSignals: (parsed.audioSignals ?? []).map((signal, index) => sanitizeAudioSignal(signal, index)),
     motionVisualNotes,
+    photoObservations,
     packetDraft,
     packetNarrativeDraft: parsed.packetNarrativeDraft?.contentFingerprint ? parsed.packetNarrativeDraft : undefined,
     draftCaptures: parsed.draftCaptures ?? [],
@@ -92,9 +113,9 @@ export function migrateSession(parsed: StoredSession): SemaSession {
       story: summary || parsed.story?.rawText?.trim() ? "saved" : "empty",
       body_location: bodyLocation.length ? "saved" : "empty",
       audio: parsed.audioSignals?.length ? "saved" : "empty",
-      motion_visual: motionVisualNotes.length ? "saved" : "planned_later",
       packet: packetDraft ? "saved" : "empty",
-      ...parsed.folderStatus
+      ...parsed.folderStatus,
+      motion_visual: motionVisualNotes.length || photoObservations.length ? "saved" : "optional"
     }
   };
 }
@@ -151,6 +172,9 @@ export function useSemaSession() {
         type: "add_motion_visual_note",
         note: { id: `motion-${Date.now()}`, note, createdAt: new Date().toISOString(), source: "patient_stated" }
       }),
+      addPhotoObservation: (photo: PhotoObservationMetadata) => dispatch({ type: "add_photo_observation", photo }),
+      updatePhotoObservation: (photo: PhotoObservationMetadata) => dispatch({ type: "update_photo_observation", photo }),
+      removePhotoObservation: (id: string) => dispatch({ type: "remove_photo_observation", id }),
       preparePacket: () => {
         if (session.story.summaryStatus === "needs_review" || session.packetNarrativeDraft?.status === "needs_review") return false;
         dispatch({ type: "set_packet", packet: buildEvidencePacket(session) });
@@ -164,7 +188,7 @@ export function useSemaSession() {
             ...createEmptySession(),
             concernType: DEMO_CONCERN_TYPE,
             activeFolder: "story",
-            folderStatus: { story: "needs_review", body_location: "saved", audio: "saved", motion_visual: "planned_later", packet: "empty" },
+            folderStatus: { story: "needs_review", body_location: "saved", audio: "saved", motion_visual: "optional", packet: "empty" },
             story: { rawText: DEMO_STORY, structuredSummary: summary, summaryStatus: "needs_review" },
             bodyLocation: [DEMO_BODY_OBSERVATION],
             audioSignals: [DEMO_AUDIO_SIGNAL],

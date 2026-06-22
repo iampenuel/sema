@@ -8,7 +8,7 @@ import type { LiveToolCall } from "./liveTypes";
 
 export const LIVE_TOOL_NAMES = [
   "openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails",
-  "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "readPacketSection", "exportPacketPdf", "openVoiceDraftReview"
+  "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "readPacketSection", "exportPacketPdf", "openVoiceDraftReview", "openPhotoCapture", "readPhotoObservation"
 ] as const;
 
 export type LiveToolName = typeof LIVE_TOOL_NAMES[number];
@@ -28,7 +28,9 @@ const schemas: Record<LiveToolName, z.ZodType<Record<string, unknown>>> = {
   prepareEvidencePacket: emptySchema,
   readPacketSection: z.object({ section: sectionSchema }).strict(),
   exportPacketPdf: emptySchema,
-  openVoiceDraftReview: z.object({ target: z.enum(["story", "audio"]).optional() }).strict()
+  openVoiceDraftReview: z.object({ target: z.enum(["story", "audio"]).optional() }).strict(),
+  openPhotoCapture: emptySchema,
+  readPhotoObservation: emptySchema
 };
 
 export const LIVE_FUNCTION_DECLARATIONS: FunctionDeclaration[] = LIVE_TOOL_NAMES.map((name) => {
@@ -44,7 +46,9 @@ export const LIVE_FUNCTION_DECLARATIONS: FunctionDeclaration[] = LIVE_TOOL_NAMES
     prepareEvidencePacket: "Propose preparing the evidence packet draft. Requires visible user permission.",
     readPacketSection: "Read one section of the prepared evidence packet.",
     exportPacketPdf: "Propose downloading the prepared evidence packet as a PDF. Requires visible user permission; spoken agreement is not permission.",
-    openVoiceDraftReview: "Navigate to the existing browser-local voice draft review. Never starts the microphone."
+    openVoiceDraftReview: "Navigate to the existing browser-local voice draft review. Never starts the microphone.",
+    openPhotoCapture: "Open the Motion/Visual photo explanation. Never requests camera access, starts the camera, captures, saves, or approves a photo.",
+    readPhotoObservation: "Read only user-authored metadata for the latest approved photo. Never analyze or interpret the image."
   };
   const properties: Record<string, Schema> = {};
   if (name === "openSignalFolder" || name === "readSignalFolder") properties.folderId = { type: Type.STRING, enum: ["story", "body_location", "audio", "motion_visual", "packet"] };

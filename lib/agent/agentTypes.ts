@@ -23,6 +23,8 @@ export type AgentActionType =
   | "openVoiceDraftReview"
   | "saveVoiceDraftToFolder"
   | "discardVoiceDraft"
+  | "openPhotoCapture"
+  | "readPhotoObservation"
   | "blockedSafetyResponse";
 
 export type AgentActionRiskLevel = "read_only" | "navigation" | "write" | "high_impact" | "blocked";

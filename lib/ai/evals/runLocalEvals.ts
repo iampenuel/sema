@@ -45,7 +45,7 @@ const evals: Eval[] = [
   { name: "packet PDF filename is stable and contains no patient content", run: () => assert.equal(packetPdfFilename("2026-06-21T12:00:00.000Z"), "sema-evidence-packet-2026-06-21.pdf") },
   { name: "packet PDF maps every preview section", run: () => {
     const sections = buildPacketPdfSections(buildEvidencePacket(evalSession()));
-    assert.deepEqual(sections.map((section) => section.title), ["Main concern", "Patient's own words", "Organized summary", "Timeline", "Body/location observations", "Audio observations", "Motion/visual notes", "Missing details", "Questions for clinician", "Safety note", IMPORTANT_DISCLAIMERS_LABEL]);
+    assert.deepEqual(sections.map((section) => section.title), ["Main concern", "Patient's own words", "Organized summary", "Timeline", "Body/location observations", "Audio observations", "Motion/visual notes", "Patient-provided photos", "Missing details", "Questions for clinician", "Safety note", IMPORTANT_DISCLAIMERS_LABEL]);
   } },
   { name: "packet keeps its internal limitations field for compatibility", run: () => assert.ok(buildEvidencePacket(evalSession()).limitations.length > 0) },
   { name: "privacy disclosures cover implemented data flows", run: () => {

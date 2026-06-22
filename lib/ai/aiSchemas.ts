@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const SafetyFlagTypeSchema = z.enum([
-  "diagnosis_request", "treatment_request", "triage_request", "safe_unsafe_request",
+  "diagnosis_request", "treatment_request", "triage_request", "safe_unsafe_request", "image_interpretation_request",
   "audio_classification_request", "body_map_overinterpretation", "delay_care_request",
   "privacy_warning", "missing_context"
 ]);
@@ -23,7 +23,7 @@ export const StoryExtractionDraftSchema = z.object({
   safetyFlags: z.array(SafetyFlagTypeSchema.exclude(["privacy_warning"])).max(10)
 });
 
-export const AgentActionTypeSchema = z.enum(["openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder", "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket"]);
+export const AgentActionTypeSchema = z.enum(["openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder", "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket", "openPhotoCapture", "readPhotoObservation"]);
 
 export const AgentActionProposalSchema = z.object({
   type: AgentActionTypeSchema,

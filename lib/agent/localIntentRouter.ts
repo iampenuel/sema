@@ -33,6 +33,12 @@ export function routeLocalIntent(message: string, session: SemaSession, currentR
   const context = buildAgentContext(session, currentRoute);
   const voice = routeLocalVoiceIntent(message);
   if (voice) return voice;
+  if (/\b(take|capture|add) (?:a )?(?:picture|photo)\b/.test(lower) || lower === "open photo capture") {
+    return { reply: "I opened the photo panel. Camera access starts only after you choose Allow camera.", proposedActions: [createAgentAction("openPhotoCapture")], safetyFlags: [] };
+  }
+  if (/\bread (?:my |the )?photo observation/.test(lower)) {
+    return { reply: "I can read the note and availability for an approved photo without analyzing the image.", proposedActions: [createAgentAction("readPhotoObservation")], safetyFlags: [] };
+  }
 
   if (/\b(close (?:the )?folder|back to (?:the )?folders?|folder (?:overview|section)|show (?:me )?(?:all )?(?:the )?folders?)\b/.test(lower)) {
     return { reply: "I can take you back to the signal folder overview.", proposedActions: [createAgentAction("showSignalFolderOverview")], safetyFlags: [] };

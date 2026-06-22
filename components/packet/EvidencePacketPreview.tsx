@@ -3,9 +3,10 @@
 import { FileText, ShieldCheck } from "lucide-react";
 import { PdfExportButton } from "./PdfExportButton";
 import type { EvidencePacket } from "@/lib/sema-session/types";
+import type { RuntimePhotoAttachment } from "@/lib/photo/types";
 import { concernTypeLabels, signalTypeLabels } from "@/lib/sema-session/types";
 
-export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
+export function EvidencePacketPreview({ packet, runtimePhotos = [] }: { packet?: EvidencePacket; runtimePhotos?: RuntimePhotoAttachment[] }) {
   if (!packet) {
     return (
       <section className="rounded-lg border border-sema-border bg-[#dceaf4] p-3 shadow-card" aria-labelledby="packet-title">
@@ -42,7 +43,7 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
           <p className="mt-1 text-sm text-muted">Generated {new Date(packet.generatedAt).toLocaleString()}</p>
           <p className="mt-1 text-sm text-muted">Concern type: {packet.concernType ? concernTypeLabels[packet.concernType] : "Not selected"}</p>
         </div>
-        <PdfExportButton packet={packet} />
+        <PdfExportButton packet={packet} runtimePhotos={runtimePhotos} />
       </div>
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -113,6 +114,18 @@ export function EvidencePacketPreview({ packet }: { packet?: EvidencePacket }) {
           </ul>
         </PacketSection>
       </div>
+
+      {packet.photoObservations.filter((photo) => photo.includeInPacket).length > 0 && <section className="mt-6 rounded-md border border-sema-border bg-white p-4">
+        <h3 className="font-semibold text-ink">Patient-provided photos</h3>
+        <p className="mt-1 text-xs font-semibold text-sema-blue">Not clinically analyzed</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">{packet.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => {
+          const runtime = runtimePhotos.find((attachment) => attachment.metadata.id === photo.id);
+          return <article key={photo.id} className="rounded-md border border-sema-border p-3">
+            {runtime?.blob ? <p className="text-sm text-sema-slate">Approved current-tab photo will be included in the PDF.</p> : <p className="text-sm text-sema-slate">Photo was not retained by Sema after the browser session.</p>}
+            <p className="mt-2 text-sm text-sema-slate">{photo.note || "No note added."}</p>
+          </article>;
+        })}</div>
+      </section>}
       </div>
     </section>
   );

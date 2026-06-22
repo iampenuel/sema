@@ -1,5 +1,6 @@
 import type { EvidencePacket } from "@/lib/sema-session/types";
 import { concernTypeLabels, signalTypeLabels } from "@/lib/sema-session/types";
+import type { RuntimePhotoAttachment } from "@/lib/photo/types";
 
 export type PacketPdfSection = {
   title: string;
@@ -72,6 +73,13 @@ export function buildPacketPdfSections(packet: EvidencePacket): PacketPdfSection
       bullets: packet.motionVisualNotes.length ? packet.motionVisualNotes.map((note) => note.note) : ["No motion/visual notes added."]
     },
     {
+      title: "Patient-provided photos",
+      paragraphs: ["Patient-provided photo · Not clinically analyzed"],
+      bullets: packet.photoObservations.filter((photo) => photo.includeInPacket).length
+        ? packet.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => [photo.note || "No note added.", photo.bodyLocation ? `Body location: ${photo.bodyLocation}` : "", "Photo availability is limited to the current browser tab."].filter(Boolean).join(" - "))
+        : ["No photos approved for this packet."]
+    },
+    {
       title: "Missing details",
       paragraphs: [],
       bullets: packet.missingDetails.length ? packet.missingDetails : ["No approved missing-detail checklist."]
@@ -104,7 +112,13 @@ function pdfSafeText(value: string) {
     .replace(/\u00a0/g, " ");
 }
 
-export async function generateEvidencePacketPdf(packet: EvidencePacket): Promise<Blob> {
+export function fitPhotoWithinBounds(width: number, height: number, maximumWidth: number, maximumHeight: number) {
+  if (width <= 0 || height <= 0) return { width: 0, height: 0 };
+  const scale = Math.min(maximumWidth / width, maximumHeight / height, 1);
+  return { width: width * scale, height: height * scale };
+}
+
+export async function generateEvidencePacketPdf(packet: EvidencePacket, runtimePhotos: RuntimePhotoAttachment[] = []): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "letter", compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -189,6 +203,29 @@ export async function generateEvidencePacketPdf(packet: EvidencePacket): Promise
     y += 5;
   }
 
+  const runtimeById = new Map(runtimePhotos.map((attachment) => [attachment.metadata.id, attachment]));
+  for (const photo of packet.photoObservations.filter((item) => item.includeInPacket)) {
+    const attachment = runtimeById.get(photo.id);
+    ensureSpace(60);
+    doc.setDrawColor(190, 211, 226);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 18;
+    addParagraph("Patient-provided photo · Not clinically analyzed", { bold: true });
+    if (photo.note) addParagraph(photo.note);
+    if (!attachment?.blob) {
+      addParagraph("Photo was not retained by Sema after the browser session.");
+      continue;
+    }
+    const fitted = fitPhotoWithinBounds(photo.width, photo.height, contentWidth, 360);
+    const imageWidth = Math.max(1, fitted.width);
+    const imageHeight = Math.max(1, fitted.height);
+    if (y + imageHeight + 10 > footerTop) addPage();
+    const bytes = new Uint8Array(await attachment.blob.arrayBuffer());
+    doc.addImage(bytes, "JPEG", margin, y, imageWidth, imageHeight, undefined, "FAST");
+    bytes.fill(0);
+    y += imageHeight + 14;
+  }
+
   const pages = doc.getNumberOfPages();
   for (let page = 1; page <= pages; page += 1) {
     doc.setPage(page);
@@ -204,8 +241,8 @@ export async function generateEvidencePacketPdf(packet: EvidencePacket): Promise
   return doc.output("blob");
 }
 
-export async function downloadEvidencePacketPdf(packet: EvidencePacket) {
-  const blob = await generateEvidencePacketPdf(packet);
+export async function downloadEvidencePacketPdf(packet: EvidencePacket, runtimePhotos: RuntimePhotoAttachment[] = []) {
+  const blob = await generateEvidencePacketPdf(packet, runtimePhotos);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

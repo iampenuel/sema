@@ -25,6 +25,8 @@ export const AGENT_ACTION_REGISTRY: Record<AgentActionType, ActionMeta> = {
   openVoiceDraftReview: { label: "Review voice draft", description: "Open the current browser-local voice draft for review.", riskLevel: "navigation", requiresPermission: false },
   saveVoiceDraftToFolder: { label: "Review voice draft for saving", description: "Open the voice review and target folder controls. The user must approve the save in the panel.", riskLevel: "write", requiresPermission: true },
   discardVoiceDraft: { label: "Discard voice draft", description: "Delete the current unsaved voice draft.", riskLevel: "high_impact", requiresPermission: true },
+  openPhotoCapture: { label: "Open photo capture", description: "Open the Motion/Visual photo explanation. Camera access still requires the user's button press.", riskLevel: "navigation", requiresPermission: false },
+  readPhotoObservation: { label: "Read photo observation", description: "Read user-authored photo metadata without interpreting the image.", riskLevel: "read_only", requiresPermission: false },
   blockedSafetyResponse: { label: "Blocked safety request", description: "Do not execute a request that crosses Sema's safety boundary.", riskLevel: "blocked", requiresPermission: false }
 };
 
@@ -32,7 +34,7 @@ export const AGENT_ACTION_REGISTRY: Record<AgentActionType, ActionMeta> = {
 export const MODEL_CALLABLE_AGENT_ACTIONS: AgentActionType[] = [
   "openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails",
   "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder",
-  "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket"
+  "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket", "openPhotoCapture", "readPhotoObservation"
 ];
 
 let actionSequence = 0;

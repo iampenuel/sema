@@ -7,6 +7,7 @@ function proposal(reply: string, type: AgentAIProposal["proposedActions"][number
 
 export function routeExactAgentIntent(message: string, context: AgentContextSnapshot): AgentAIProposal | null {
   const lower = message.toLowerCase().trim().replace(/[.!?]+$/, "");
+  if (/^(take|capture) (a )?(picture|photo)$/.test(lower) || lower === "open photo capture") return proposal("I opened the photo panel. Camera access starts only after you choose Allow camera.", "openPhotoCapture");
   if (/^(open story|take me to (the )?story|open the story folder)$/.test(lower)) return proposal("I can open the Story Signal Folder.", "openSignalFolder", { folder: "story" });
   if (/^(open (the )?body( map| folder)?|take me to (the )?body map)$/.test(lower)) return proposal("I can open the Body/Location Signal Folder.", "openSignalFolder", { folder: "body_location" });
   if (/^(record audio|open (the )?audio( folder)?|take me to (the )?audio)$/.test(lower)) return proposal("I can open the Audio Signal Folder.", "openSignalFolder", { folder: "audio" });

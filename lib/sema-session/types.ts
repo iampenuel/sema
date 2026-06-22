@@ -1,3 +1,5 @@
+import type { PhotoObservationMetadata } from "@/lib/photo/types";
+
 export type ConcernType =
   | "pain_injury"
   | "cough_respiratory"
@@ -78,6 +80,7 @@ export type EvidencePacket = {
   bodyLocationObservations: BodyMapObservation[];
   audioSignals: PacketAudioSignal[];
   motionVisualNotes: MotionVisualNote[];
+  photoObservations: PhotoObservationMetadata[];
   missingDetails: string[];
   clinicianQuestions: string[];
   organizedNarrative?: string;
@@ -106,6 +109,7 @@ export type SafetyFlag = {
     | "safe_unsafe_request"
     | "audio_classification_request"
     | "body_map_overinterpretation"
+    | "image_interpretation_request"
     | "delay_care_request"
     | "privacy_warning"
     | "missing_context";
@@ -136,6 +140,7 @@ export type SemaSession = {
   bodyLocation: BodyMapObservation[];
   audioSignals: AudioSignal[];
   motionVisualNotes: MotionVisualNote[];
+  photoObservations: PhotoObservationMetadata[];
   packetDraft?: EvidencePacket;
   packetNarrativeDraft?: PacketNarrativeDraft;
   draftCaptures: DraftCapture[];

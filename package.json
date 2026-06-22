@@ -10,6 +10,7 @@
     "test:ai": "node --import tsx lib/ai/evals/runLocalEvals.ts",
     "test:voice": "node --import tsx lib/voice/evals/runVoiceEvals.ts",
     "test:live": "node --import tsx lib/live/evals/runLiveEvals.ts",
+    "test:photo": "node --import tsx lib/photo/evals/runPhotoEvals.ts",
     "test:live:diagnose": "node --import tsx lib/live/evals/runLiveDiagnostic.ts",
     "test:live:constraints": "node --import tsx lib/live/evals/runLiveConstraintProbes.ts",
     "test:live:preflight": "node --import tsx lib/live/evals/runLivePreflight.ts",
@@ -24,9 +25,12 @@
   },
   "dependencies": {
     "@google/genai": "^2.9.0",
+    "@tensorflow/tfjs": "4.22.0",
+    "buffer": "6.0.3",
     "jspdf": "^4.2.1",
     "lucide-react": "latest",
     "next": "latest",
+    "nsfwjs": "4.3.0",
     "react": "latest",
     "react-dom": "latest",
     "zod": "^4.4.3"

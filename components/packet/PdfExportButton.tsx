@@ -6,8 +6,9 @@ import { createAgentAction } from "@/lib/agent/actionRegistry";
 import { evaluatePermission } from "@/lib/agent/permissionGate";
 import { downloadEvidencePacketPdf } from "@/lib/packet/pdfExport";
 import type { EvidencePacket } from "@/lib/sema-session/types";
+import type { RuntimePhotoAttachment } from "@/lib/photo/types";
 
-export function PdfExportButton({ packet }: { packet: EvidencePacket }) {
+export function PdfExportButton({ packet, runtimePhotos = [] }: { packet: EvidencePacket; runtimePhotos?: RuntimePhotoAttachment[] }) {
   const [status, setStatus] = useState<"idle" | "generating" | "downloaded" | "error">("idle");
 
   async function handleDownload() {
@@ -18,7 +19,7 @@ export function PdfExportButton({ packet }: { packet: EvidencePacket }) {
     if (ok) {
       setStatus("generating");
       try {
-        await downloadEvidencePacketPdf(packet);
+        await downloadEvidencePacketPdf(packet, runtimePhotos);
         setStatus("downloaded");
       } catch {
         setStatus("error");

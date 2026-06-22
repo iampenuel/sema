@@ -32,7 +32,10 @@ export function containsRawAudioFields(value: unknown) {
   return /"(?:objectUrl|audioBlob|waveformPeaks|interimTranscript)"|blob:|data:audio\//i.test(serialized);
 }
 
-const ephemeralAudioKeys = new Set(["objectUrl", "audioObjectUrl", "audioBlob", "waveformPeaks", "interimTranscript", "stream", "mediaStream"]);
+const ephemeralAudioKeys = new Set([
+  "objectUrl", "audioObjectUrl", "audioBlob", "waveformPeaks", "interimTranscript", "stream", "mediaStream",
+  "blob", "file", "base64", "imageData", "pixelBuffer", "tensor", "boundingBoxes", "deviceId", "privacyModelVersion"
+]);
 
 export function serializeSemaSession(session: SemaSession) {
   return JSON.stringify(session, (key, value) => {

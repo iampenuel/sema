@@ -9,6 +9,7 @@ import type { DraftCapture, SemaSession, SignalFolderId } from "@/lib/sema-sessi
 import { SEMAPHASE_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
 import type { AgentAction } from "@/lib/agent/agentTypes";
 import { downloadEvidencePacketPdf } from "@/lib/packet/pdfExport";
+import type { RuntimePhotoAttachment } from "@/lib/photo/types";
 
 type Handlers = {
   dispatch: Dispatch<SemaSessionAction>;
@@ -17,6 +18,9 @@ type Handlers = {
   getSession: () => SemaSession;
   onNavigate: (folder: SignalFolderId) => void;
   onVoiceAction?: (action: AgentAction) => string;
+  onOpenPhotoCapture?: () => void;
+  onClearEphemeralPhotos?: () => void;
+  getRuntimePhotoAttachments?: () => RuntimePhotoAttachment[];
 };
 
 function summaryDraft(content: unknown): DraftCapture {
@@ -63,7 +67,17 @@ export function useAgentActions(handlers: Handlers) {
       case "readSafetyNote":
         return SEMAPHASE_SAFETY_NOTE;
       case "readCurrentPage":
-        return "This session workspace contains flexible Story, Body/Location, Audio, and Motion/Visual folders, followed by review, packet readiness, and packet preview.";
+        return "This session workspace contains flexible Story, Body/Location, Audio, and Motion/Visual folders, including optional privacy-checked photo capture, followed by review, packet readiness, and packet preview.";
+      case "openPhotoCapture":
+        handlers.onNavigate("motion_visual");
+        handlers.onOpenPhotoCapture?.();
+        focus(handlers.activePanelRef);
+        return "I opened the photo panel. Camera access starts only after you choose Allow camera.";
+      case "readPhotoObservation": {
+        const photo = session.photoObservations.find((item) => item.id === action.payload?.id) ?? session.photoObservations.at(-1);
+        if (!photo) return "No approved photo observation is saved.";
+        return `This patient-provided photo is not clinically analyzed. ${photo.note ? `The user's note says: ${photo.note}` : "No note was added."} It is available only in the current tab.`;
+      }
       case "generateStorySummary": {
         if (!session.story.rawText.trim()) return "Add patient-provided story text before generating a summary.";
         const summary = generateStructuredSummary(session.story.rawText);
@@ -113,12 +127,13 @@ export function useAgentActions(handlers: Handlers) {
       case "exportPacketPdf":
         if (!session.packetDraft) return "Prepare a packet draft before exporting.";
         try {
-          const filename = await downloadEvidencePacketPdf(session.packetDraft);
+          const filename = await downloadEvidencePacketPdf(session.packetDraft, handlers.getRuntimePhotoAttachments?.() ?? []);
           return `The evidence packet PDF was downloaded as ${filename}.`;
         } catch {
           return "I could not create the PDF. Your packet is still available in this browser.";
         }
       case "clearSession":
+        handlers.onClearEphemeralPhotos?.();
         handlers.dispatch({ type: "replace_session", session: createEmptySession() });
         handlers.onNavigate("story");
         return "Session cleared from this browser.";

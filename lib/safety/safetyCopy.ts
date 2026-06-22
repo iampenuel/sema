@@ -42,9 +42,9 @@ export const PRIVACY_DISCLOSURES = [
   },
   {
     title: "Current phase boundaries",
-    detail: "Sema currently has no user accounts, account-based cloud clinical record, EHR integration, or photo capture. It is a prototype for organizing patient-provided observations."
+    detail: "Photo capture and camera access start only after you choose Allow camera. Sampled preview frames are checked on this device and are not uploaded for the privacy check. The safeguard can make mistakes, so blocked and uncertain frames cannot be captured. Approved raw photos remain in current-tab memory only; approved metadata and user-authored notes may be stored locally, and opted-in photos may enter a PDF generated in your browser. Images are not sent to Gemini and Sema does not medically analyze them. Sema has no user accounts, account-based cloud clinical record, or EHR integration."
   }
 ] as const;
 
 export const SAFE_REDIRECT =
-  "I cannot determine whether this is serious, diagnose, recommend treatment, or classify audio as a disease. I can help organize what you noticed and prepare questions to discuss with a licensed clinician. If symptoms feel severe, urgent, rapidly worsening, or concerning to you, seek appropriate medical or emergency care.";
+  "I cannot determine whether this is serious, diagnose, recommend treatment, classify audio as a disease, or medically interpret a photo. I can help organize what you noticed and prepare questions to discuss with a licensed clinician. If symptoms feel severe, urgent, rapidly worsening, or concerning to you, seek appropriate medical or emergency care.";

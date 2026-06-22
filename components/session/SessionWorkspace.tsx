@@ -13,6 +13,7 @@ import { AIClientError, draftPacketWithAI, extractStoryWithAI, storyDraftToSumma
 import { evaluatePermission } from "@/lib/agent/permissionGate";
 import { useAgentActions } from "@/hooks/useAgentActions";
 import { useSemaSession } from "@/hooks/useSemaSession";
+import { useEphemeralPhotos } from "@/hooks/useEphemeralPhotos";
 import { useVoiceCapture } from "@/hooks/useVoiceCapture";
 import { useSemaLiveSession } from "@/hooks/useSemaLiveSession";
 import { buildApprovedSessionContent, fingerprintApprovedSessionContent } from "@/lib/packet/approvedContent";
@@ -22,6 +23,7 @@ import { MotionVisualSignalFolder } from "./MotionVisualSignalFolder";
 import { ReviewBoard } from "./ReviewBoard";
 import { SignalFolderGrid, type SignalFolderId } from "./SignalFolderGrid";
 import type { AudioSignal } from "@/lib/sema-session/types";
+import type { EphemeralPhotoDraft, PhotoObservationMetadata } from "@/lib/photo/types";
 import type { VoiceTargetFolder } from "@/lib/voice/voiceTypes";
 
 const folderLabels: Record<SignalFolderId, string> = {
@@ -55,13 +57,18 @@ export function SessionWorkspace() {
     addAudioSignal,
     removeAudioSignal,
     addMotionVisualNote,
+    addPhotoObservation,
+    updatePhotoObservation,
+    removePhotoObservation,
     preparePacket,
     loadDemo,
     clearSession
   } = useSemaSession();
+  const ephemeralPhotos = useEphemeralPhotos();
   const voiceCapture = useVoiceCapture();
   const [voicePanelTarget, setVoicePanelTarget] = useState<VoiceTargetFolder | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [photoCaptureOpen, setPhotoCaptureOpen] = useState(false);
   const [storyOrganizing, setStoryOrganizing] = useState(false);
   const [storyFallbackNotice, setStoryFallbackNotice] = useState<string | null>(null);
   const [storyAIError, setStoryAIError] = useState<string | null>(null);
@@ -81,11 +88,18 @@ export function SessionWorkspace() {
     packetRef,
     getSession: () => session,
     onNavigate: (folder) => openFolder(folder),
-    onVoiceAction: handleVoiceAgentAction
+    onVoiceAction: handleVoiceAgentAction,
+    onOpenPhotoCapture: () => {
+      setActiveFolder("motion_visual");
+      setPhotoCaptureOpen(true);
+    },
+    onClearEphemeralPhotos: ephemeralPhotos.clear,
+    getRuntimePhotoAttachments: () => ephemeralPhotos.attachments()
   });
   const live = useSemaLiveSession({ session, executeAction: agentActions.execute, onSafetyFlags: (flags) => dispatch({ type: "add_safety_flags", flags }) });
 
   function openFolder(folder: SignalFolderId, scroll = true) {
+    if (folder !== "motion_visual") setPhotoCaptureOpen(false);
     if (voicePanelTarget && folder !== voicePanelTarget) {
       const hasVoiceWork = Boolean(voiceCapture.state.audioBlob || voiceCapture.state.transcriptDraft.trim() || voiceCapture.state.elapsedSeconds);
       if (hasVoiceWork && !window.confirm("Leave voice capture and delete the unsaved browser-local draft?")) return;
@@ -159,9 +173,22 @@ export function SessionWorkspace() {
     const decision = evaluatePermission(createAgentAction("clearSession"));
     const confirmed = window.confirm(decision.message);
     if (confirmed) {
+      ephemeralPhotos.clear();
+      setPhotoCaptureOpen(false);
       clearSession();
       setActiveFolder("story");
     }
+  }
+
+  function approvePhoto(draft: EphemeralPhotoDraft, metadata: PhotoObservationMetadata) {
+    ephemeralPhotos.add(draft);
+    addPhotoObservation(metadata);
+  }
+
+  function removePhoto(id: string) {
+    if (!window.confirm("Remove this photo observation and delete its current-tab image?")) return;
+    ephemeralPhotos.remove(id);
+    removePhotoObservation(id);
   }
 
   async function requestGenerateSummary() {
@@ -288,7 +315,18 @@ export function SessionWorkspace() {
                 <FolderContinue onClick={() => openFolder("motion_visual")} label="Continue to optional Motion/Visual Signal" />
               </div>
             )}
-            {session.activeFolder === "motion_visual" && <MotionVisualSignalFolder notes={session.motionVisualNotes} onSave={addMotionVisualNote} />}
+            {session.activeFolder === "motion_visual" && <MotionVisualSignalFolder
+              notes={session.motionVisualNotes}
+              photos={session.photoObservations}
+              photoCaptureOpen={photoCaptureOpen}
+              onOpenPhotoCapture={() => setPhotoCaptureOpen(true)}
+              onClosePhotoCapture={() => setPhotoCaptureOpen(false)}
+              onApprovePhoto={approvePhoto}
+              onUpdatePhoto={updatePhotoObservation}
+              onRemovePhoto={removePhoto}
+              getRuntimePhoto={ephemeralPhotos.get}
+              onSave={addMotionVisualNote}
+            />}
           </section>}
 
           <ReviewBoard
@@ -311,7 +349,7 @@ export function SessionWorkspace() {
           <PacketReadinessCard session={session} onPrepare={requestPreparePacket} />
 
           <div ref={packetRef} className="scroll-mt-24">
-            <EvidencePacketPreview packet={session.packetDraft} />
+            <EvidencePacketPreview packet={session.packetDraft} runtimePhotos={ephemeralPhotos.attachments(new Set(session.packetDraft?.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => photo.id) ?? []))} />
           </div>
         </div>
       </div>

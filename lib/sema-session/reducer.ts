@@ -11,6 +11,7 @@ import type {
   SignalFolderId,
   StructuredSummary
 } from "./types";
+import type { PhotoObservationMetadata } from "@/lib/photo/types";
 
 export type SemaSessionAction =
   | { type: "set_concern_type"; concernType: ConcernType }
@@ -27,6 +28,9 @@ export type SemaSessionAction =
   | { type: "add_audio_signal"; signal: AudioSignal }
   | { type: "remove_audio_signal"; id: string }
   | { type: "add_motion_visual_note"; note: MotionVisualNote }
+  | { type: "add_photo_observation"; photo: PhotoObservationMetadata }
+  | { type: "update_photo_observation"; photo: PhotoObservationMetadata }
+  | { type: "remove_photo_observation"; id: string }
   | { type: "add_draft_capture"; draft: DraftCapture }
   | { type: "approve_draft_capture"; id: string }
   | { type: "discard_draft_capture"; id: string }
@@ -146,6 +150,15 @@ export function semaSessionReducer(session: SemaSession, action: SemaSessionActi
     }
     case "add_motion_visual_note":
       return touch(withFolderStatus(invalidatePacketContent({ ...session, motionVisualNotes: [...session.motionVisualNotes, action.note] }), "motion_visual", "saved"));
+    case "add_photo_observation":
+      return touch(withFolderStatus(invalidatePacketContent({ ...session, photoObservations: [...session.photoObservations, action.photo] }), "motion_visual", "saved"));
+    case "update_photo_observation":
+      return touch(invalidatePacketContent({ ...session, photoObservations: session.photoObservations.map((photo) => photo.id === action.photo.id ? action.photo : photo) }));
+    case "remove_photo_observation": {
+      const photoObservations = session.photoObservations.filter((photo) => photo.id !== action.id);
+      const status = session.motionVisualNotes.length || photoObservations.length ? "saved" : "optional";
+      return touch(withFolderStatus(invalidatePacketContent({ ...session, photoObservations }), "motion_visual", status));
+    }
     case "add_draft_capture":
       return touch({ ...session, draftCaptures: [...session.draftCaptures, action.draft] });
     case "approve_draft_capture":

@@ -115,7 +115,7 @@ await test("identical final transcript updates replace partial duplicates", () =
   assert.equal(final.transcript[0].final, true);
 });
 
-await test("all and only approved Live tools are declared", () => assert.deepEqual(LIVE_TOOL_NAMES, ["openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "readPacketSection", "exportPacketPdf", "openVoiceDraftReview"]));
+await test("all and only approved Live tools are declared", () => assert.deepEqual(LIVE_TOOL_NAMES, ["openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails", "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "readPacketSection", "exportPacketPdf", "openVoiceDraftReview", "openPhotoCapture", "readPhotoObservation"]));
 await test("tool declarations do not expose trusted risk", async () => {
   const declarations = (await import("../liveTools")).LIVE_FUNCTION_DECLARATIONS;
   assert.equal(JSON.stringify(declarations).includes("riskLevel"), false);
@@ -250,7 +250,11 @@ await test("tool completion follows a success result", async () => {
   provider.sendToolResult(call, { ok: true, message: "The page was read." });
   assert.equal(provider.results[0].result.message, "The page was read.");
 });
-await test("no camera or image tools are introduced", () => assert.equal(LIVE_TOOL_NAMES.some((name) => /camera|image|photo/i.test(name)), false));
+await test("photo tools cannot activate the camera or interpret images", () => {
+  assert.deepEqual(LIVE_TOOL_NAMES.filter((name) => /photo/i.test(name)), ["openPhotoCapture", "readPhotoObservation"]);
+  assert.match(LIVE_SYSTEM_INSTRUCTION, /Do not start microphone or camera access/);
+  assert.match(LIVE_SYSTEM_INSTRUCTION, /Never.*interpret a photo/);
+});
 await test("Live instruction treats microphone audio as a spoken conversation", () => {
   assert.match(LIVE_SYSTEM_INSTRUCTION, /real-time spoken audio conversation/);
   assert.match(LIVE_SYSTEM_INSTRUCTION, /Never claim that you cannot hear/);

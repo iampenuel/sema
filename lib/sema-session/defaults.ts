@@ -9,13 +9,14 @@ export function createEmptySession(): SemaSession {
       story: "empty",
       body_location: "empty",
       audio: "empty",
-      motion_visual: "planned_later",
+      motion_visual: "optional",
       packet: "empty"
     },
     story: { rawText: "" },
     bodyLocation: [],
     audioSignals: [],
     motionVisualNotes: [],
+    photoObservations: [],
     draftCaptures: [],
     safetyFlags: [],
     updatedAt: "1970-01-01T00:00:00.000Z"
