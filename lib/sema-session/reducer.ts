@@ -16,6 +16,7 @@ import type { PhotoObservationMetadata } from "@/lib/photo/types";
 export type SemaSessionAction =
   | { type: "set_concern_type"; concernType: ConcernType }
   | { type: "open_folder"; folder: SignalFolderId }
+  | { type: "mark_folder_not_applicable"; folder: Exclude<SignalFolderId, "story" | "packet"> }
   | { type: "update_story_raw_text"; rawText: string }
   | { type: "apply_voice_story_text"; transcript: string; mode: "append" | "replace" }
   | { type: "save_story" }
@@ -61,6 +62,8 @@ export function semaSessionReducer(session: SemaSession, action: SemaSessionActi
       return touch(invalidatePacketContent({ ...session, concernType: action.concernType }));
     case "open_folder":
       return touch({ ...session, activeFolder: action.folder });
+    case "mark_folder_not_applicable":
+      return touch(withFolderStatus(invalidatePacketContent(session), action.folder, "not_applicable"));
     case "update_story_raw_text": {
       const hasSummary = Boolean(session.story.structuredSummary);
       const next = {
@@ -156,7 +159,7 @@ export function semaSessionReducer(session: SemaSession, action: SemaSessionActi
       return touch(invalidatePacketContent({ ...session, photoObservations: session.photoObservations.map((photo) => photo.id === action.photo.id ? action.photo : photo) }));
     case "remove_photo_observation": {
       const photoObservations = session.photoObservations.filter((photo) => photo.id !== action.id);
-      const status = session.motionVisualNotes.length || photoObservations.length ? "saved" : "optional";
+      const status = session.motionVisualNotes.length || photoObservations.length ? "saved" : "empty";
       return touch(withFolderStatus(invalidatePacketContent({ ...session, photoObservations }), "motion_visual", status));
     }
     case "add_draft_capture":

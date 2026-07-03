@@ -1,40 +1,40 @@
-# Sema Project Starter Folder
+# Sema project starter
 
-This folder contains the planning and implementation context for building **Sema**, a multimodal patient-generated evidence reporter.
+Sema is a demo patient-facing workspace for organizing patient-provided story, body/location, audio, motion/visual notes, and optional photos into a clinician-ready evidence packet. It is not a diagnosis, triage, treatment, or medical image interpretation tool.
 
-Sema helps users capture health-related observations before care begins and package them into a structured evidence packet. Sema is **not** a diagnostic, treatment, or triage tool.
+## Current local MVP behavior
 
-## Current implementation
+- Gemini text and Gemini Live voice remain available when configured.
+- Gemini Live uses `gemini-3.1-flash-live-preview`, Kore voice, and `medium` thinking when configured.
+- Live voice processes every supported part in each Gemini server event, uses strict no-barge-in voice behavior, tracks playback state, retries one buffered player recovery, and exposes a text fallback when audio cannot play.
+- Camera capture is optional and never starts automatically.
+- Sema does not upload preview frames and does not run continuous camera inspection.
+- After the user captures one frame, the browser sanitizes it to JPEG and sends one temporary copy to Sema’s same-origin `/api/moderation/photo` route.
+- The server calls Microsoft Azure AI Content Safety for Sexual-category moderation only.
+- Allowed photos move to user review; uncertain, blocked, unavailable, malformed, timeout, or network results fail closed.
+- No photo goes to Gemini Live, Gemini text prompts, diagnostics, localStorage, IndexedDB, or packet AI inputs.
+- Approved raw photos remain in current-tab memory only. Reloading the page removes the original image and leaves metadata/note text only.
 
-The repository now contains the Phase 1 workspace plus the stabilized Sema Live, permission-gated packet workflow, browser-local persistence, and direct packet-only PDF export. See `docs/project-status-2026-06-21.md` for the verified scope and current limitations. The files under `prompts/` and the numbered planning documents preserve the original build direction and may describe Live voice as a later phase.
+## Environment
 
-## Folder contents
+- `GEMINI_API_KEY`: optional for Gemini text/Live features.
+- `SEMA_LIVE_MODEL=gemini-3.1-flash-live-preview`: Gemini Live preview model.
+- `SEMA_LIVE_VOICE_NAME=Kore`: Live voice.
+- `SEMA_LIVE_THINKING_LEVEL=medium`: Live reasoning depth; this does not guarantee browser audio playback.
+- `SEMA_LIVE_MAX_SESSION_MINUTES=10`: Live session rollover cap.
+- `SEMA_ENABLE_AZURE_PHOTO_MODERATION=true`: enables Azure photo moderation.
+- `AZURE_CONTENT_SAFETY_ENDPOINT`: server-only Azure Content Safety endpoint.
+- `AZURE_CONTENT_SAFETY_KEY`: server-only Azure Content Safety key.
+- `SEMA_AZURE_SEXUAL_ALLOW_MAX=0`: optional severity policy override.
+- `SEMA_AZURE_SEXUAL_UNCERTAIN_MAX=2`: optional severity policy override.
 
-```txt
-docs/
-  00-master-context-from-idea-chat.txt
-  01-mvp-feature-specification-v0.2.md
-  02-technical-architecture-v0.1.md
-  03-ui-route-component-map-v0.1.md
-  04-agent-tool-permission-system-v0.1.md
-  05-ux-decision-note-v0.1.md
+If Azure moderation is not configured, photo capture is disabled by default and users can continue with text, body map, audio metadata, and motion notes.
 
-prompts/
-  codex-phase-1-session-prompt.md
+## Verification
 
-references/
-  layout-inspo-alethia-style.png
+```bash
+npm run verify
+npm run test:azure-photo:live # opt-in; skips unless Azure env is configured
 ```
 
-## Current product boundaries
-
-Build Sema as:
-
-- `/` intro/landing page.
-- `/session` main guided workspace.
-- Left Sema agent/session rail.
-- Main workspace with progressive evidence-capture cards.
-- Story, body/location, audio, packet preview, and page-aware text and Gemini Live agents.
-- Browser-local session persistence with an explicit clear-session control; there is no account-based cloud clinical record.
-- No authentication, EHR integration, diagnosis, treatment, triage, clinical-validation, HIPAA-compliance, or medical-device claims.
-- No photo capture or intimate-content protection in this checkpoint.
+`npm run verify` is intentionally offline and does not call Azure or Gemini live providers.

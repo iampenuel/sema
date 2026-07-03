@@ -38,7 +38,7 @@ export function SemaShell({
               </>
             ) : (
               <>
-                <span className="hidden rounded-full border border-sema-border bg-white px-3 py-1.5 sm:inline-flex">{status}</span>
+                {status === "Privacy & Safety" ? null : <span className="hidden rounded-full border border-sema-border bg-white px-3 py-1.5 sm:inline-flex">{status}</span>}
                 <Link href="/safety" className="inline-flex items-center gap-2 rounded-full border border-sema-border bg-white px-3 py-1.5 font-medium text-ink hover:border-sema-blue/40">
                   <ShieldCheck className="h-4 w-4 text-sema-green" aria-hidden="true" />
                   Privacy &amp; Safety

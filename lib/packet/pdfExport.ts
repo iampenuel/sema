@@ -74,9 +74,13 @@ export function buildPacketPdfSections(packet: EvidencePacket): PacketPdfSection
     },
     {
       title: "Patient-provided photos",
-      paragraphs: ["Patient-provided photo · Not clinically analyzed"],
+      paragraphs: ["Patient-provided photo · Passed automated content screening · Not clinically analyzed"],
       bullets: packet.photoObservations.filter((photo) => photo.includeInPacket).length
-        ? packet.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => [photo.note || "No note added.", photo.bodyLocation ? `Body location: ${photo.bodyLocation}` : "", "Photo availability is limited to the current browser tab."].filter(Boolean).join(" - "))
+        ? packet.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => [
+            photo.note || "No note added.",
+            photo.bodyLocation ? `Body location: ${photo.bodyLocation}` : "",
+            "Photo availability is limited to the current browser tab."
+          ].filter(Boolean).join(" - "))
         : ["No photos approved for this packet."]
     },
     {
@@ -210,10 +214,10 @@ export async function generateEvidencePacketPdf(packet: EvidencePacket, runtimeP
     doc.setDrawColor(190, 211, 226);
     doc.line(margin, y, pageWidth - margin, y);
     y += 18;
-    addParagraph("Patient-provided photo · Not clinically analyzed", { bold: true });
+    addParagraph("Patient-provided photo · Passed automated content screening · Not clinically analyzed", { bold: true });
     if (photo.note) addParagraph(photo.note);
     if (!attachment?.blob) {
-      addParagraph("Photo was not retained by Sema after the browser session.");
+      addParagraph("Original photo was not retained after the browser session.");
       continue;
     }
     const fitted = fitPhotoWithinBounds(photo.width, photo.height, contentWidth, 360);

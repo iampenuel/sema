@@ -1,15 +1,19 @@
 "use client";
 
-import { ActivityHandling, EndSensitivity, GoogleGenAI, Modality, StartSensitivity, type Session } from "@google/genai";
+import { GoogleGenAI, type Session } from "@google/genai";
+import { normalizeGeminiLiveServerEvent, type LivePartDedupKey } from "../liveEventProcessor";
+import { buildGeminiLiveSessionConfig } from "../liveSessionConfig";
 import type { LiveProvider, LiveProviderEvent, LiveTokenResponse, LiveToolCall } from "../liveTypes";
 import { classifyLiveError } from "../liveErrors";
-import { LIVE_FUNCTION_DECLARATIONS } from "../liveTools";
-import { LIVE_CONTEXT_WINDOW_COMPRESSION } from "../liveConfigCore";
 
 export class GeminiLiveProvider implements LiveProvider {
   private session?: Session;
   private onEvent?: (event: LiveProviderEvent) => void;
   private generation = 0;
+  private connectionEpoch = 0;
+  private responseEpoch = 1;
+  private eventSequence = 0;
+  private seenParts = new Set<LivePartDedupKey>();
 
   async connect(token: LiveTokenResponse, onEvent: (event: LiveProviderEvent) => void) {
     this.onEvent = onEvent;
@@ -17,44 +21,43 @@ export class GeminiLiveProvider implements LiveProvider {
     this.session = await client.live.connect({
       model: token.model,
       callbacks: {
-        onopen: () => onEvent({ type: "open" }),
+        onopen: () => {
+          this.connectionEpoch += 1;
+          this.eventSequence = 0;
+          this.seenParts.clear();
+          onEvent({ type: "open" });
+        },
         onclose: (event) => onEvent({ type: "close", reason: event.reason }),
         onerror: (event) => {
           const safe = classifyLiveError(event.message);
           onEvent({ type: "error", ...safe });
         },
         onmessage: (message) => {
-          if (message.serverContent?.interrupted) {
+          const normalized = normalizeGeminiLiveServerEvent(message, {
+            connectionEpoch: this.connectionEpoch,
+            responseEpoch: this.responseEpoch,
+            eventSequence: this.eventSequence,
+            seen: this.seenParts
+          });
+          this.eventSequence += 1;
+          if (normalized.interrupted) {
             this.generation += 1;
             onEvent({ type: "interrupted" });
           }
-          if (message.data) onEvent({ type: "audio", data: message.data, generation: this.generation });
-          const input = message.serverContent?.inputTranscription?.text ?? message.serverContent?.interimInputTranscription?.text;
-          if (input) onEvent({ type: "input_transcript", text: input, final: Boolean(message.serverContent?.inputTranscription?.text) });
-          const output = message.serverContent?.outputTranscription?.text;
-          if (output) onEvent({ type: "output_transcript", text: output, final: Boolean(message.serverContent?.turnComplete) });
-          for (const call of message.toolCall?.functionCalls ?? []) {
-            if (call.id && call.name) onEvent({ type: "tool_call", call: { id: call.id, name: call.name, args: call.args ?? {} } });
+          for (const chunk of normalized.audioChunks) onEvent({ type: "audio", data: chunk.data, generation: this.generation, responseEpoch: normalized.responseEpoch, partIndex: chunk.partIndex });
+          if (normalized.inputTranscript) onEvent({ type: "input_transcript", text: normalized.inputTranscript, final: normalized.inputTranscriptFinal });
+          for (const textPart of normalized.textParts) onEvent({ type: "output_transcript", text: textPart.text, final: normalized.turnComplete, responseEpoch: normalized.responseEpoch, partIndex: textPart.partIndex });
+          if (normalized.outputTranscript) onEvent({ type: "output_transcript", text: normalized.outputTranscript, final: normalized.turnComplete, responseEpoch: normalized.responseEpoch });
+          for (const call of normalized.toolCalls) onEvent({ type: "tool_call", call });
+          if (normalized.generationComplete) {
+            onEvent({ type: "generation_complete" });
+            this.responseEpoch += 1;
+            this.seenParts.clear();
           }
-          if (message.toolCallCancellation?.ids?.length) onEvent({ type: "interrupted" });
-          if (message.serverContent?.generationComplete) onEvent({ type: "generation_complete" });
-          if (message.serverContent?.turnComplete) onEvent({ type: "turn_complete" });
+          if (normalized.turnComplete) onEvent({ type: "turn_complete" });
         }
       },
-      config: {
-        responseModalities: [Modality.AUDIO],
-        contextWindowCompression: LIVE_CONTEXT_WINDOW_COMPRESSION,
-        realtimeInputConfig: {
-          activityHandling: ActivityHandling.NO_INTERRUPTION,
-          automaticActivityDetection: {
-            startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
-            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-            prefixPaddingMs: 100,
-            silenceDurationMs: 350
-          }
-        },
-        tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }]
-      }
+      config: buildGeminiLiveSessionConfig({ voiceName: token.voiceName || "Kore", thinkingLevel: token.thinkingLevel ?? "medium" })
     });
   }
 

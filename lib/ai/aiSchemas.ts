@@ -48,7 +48,13 @@ export const PacketAIDraftSchema = z.object({
 
 export const ConcernTypeSchema = z.enum(["pain_injury", "cough_respiratory", "skin_visible", "report_document", "other"]);
 export const FolderIdSchema = z.enum(["story", "body_location", "audio", "motion_visual", "packet"]);
-export const FolderStatusSchema = z.enum(["empty", "in_progress", "saved", "needs_review", "optional", "planned_later"]);
+export const FolderStatusSchema = z.enum(["empty", "in_progress", "saved", "needs_review", "optional", "planned_later", "not_applicable"]);
+const PacketReadinessRequirementSchema = z.object({
+  key: z.string().max(100),
+  label: z.string().max(120),
+  reason: z.string().max(300),
+  recommendedAction: z.string().max(300).optional()
+});
 
 export const ExtractStoryRequestSchema = z.object({ rawText: z.string().trim().min(1).max(12000), concernType: ConcernTypeSchema.optional() });
 export const AgentContextSchema = z.object({
@@ -56,7 +62,15 @@ export const AgentContextSchema = z.object({
   folderStatuses: z.record(FolderIdSchema, FolderStatusSchema), hasStory: z.boolean(), hasSummary: z.boolean(),
   summaryApproved: z.boolean(), bodyLocationObservationCount: z.number().int().min(0).max(100),
   audioSignalCount: z.number().int().min(0).max(100), motionVisualNoteCount: z.number().int().min(0).max(100),
-  hasPacketDraft: z.boolean(), missingDetails: z.array(z.string().max(300)).max(30),
+  hasPacketDraft: z.boolean(),
+  packetReadiness: z.object({
+    ready: z.boolean(),
+    unresolvedRequirements: z.array(PacketReadinessRequirementSchema).max(12),
+    pendingReviewCount: z.number().int().min(0).max(100),
+    packetStale: z.boolean(),
+    nextRequiredDestination: z.enum(["story", "body_location", "audio", "motion_visual", "review_board"]).optional()
+  }).optional(),
+  missingDetails: z.array(z.string().max(300)).max(30),
   safetyFlags: z.array(z.object({ id: z.string(), type: SafetyFlagTypeSchema, message: z.string().max(500), severity: z.enum(["info", "caution", "blocked"]) })).max(30),
   availableActions: z.array(AgentActionTypeSchema.or(z.literal("blockedSafetyResponse"))).max(30)
 });
@@ -75,5 +89,19 @@ export const PacketAIRequestSchema = z.object({ approvedSessionContent: z.object
   concernType: ConcernTypeSchema.optional(), patientWords: z.string().max(12000), approvedSummary: StructuredSummarySchema.optional(),
   bodyLocationObservations: z.array(BodyObservationSchema).max(100),
   audioSignalMetadata: z.array(z.object({ name: z.string().max(200), durationSeconds: z.number().min(0).max(7200), tags: z.array(z.string().max(100)).max(20), notes: z.string().max(1000).optional() })).max(100),
-  motionVisualNotes: z.array(MotionNoteSchema).max(100)
+  motionVisualNotes: z.array(MotionNoteSchema).max(100),
+  packetReadiness: z.object({
+    ready: z.boolean(),
+    concernTypeSelected: z.boolean(),
+    folders: z.object({
+      story: z.enum(["empty", "in_progress", "complete", "not_applicable", "needs_review"]),
+      bodyLocation: z.enum(["empty", "in_progress", "complete", "not_applicable", "needs_review"]),
+      audio: z.enum(["empty", "in_progress", "complete", "not_applicable", "needs_review"]),
+      motionVisual: z.enum(["empty", "in_progress", "complete", "not_applicable", "needs_review"])
+    }),
+    unresolvedRequirements: z.array(PacketReadinessRequirementSchema).max(12),
+    pendingReviewCount: z.number().int().min(0).max(100),
+    packetStale: z.boolean(),
+    nextRequiredDestination: z.enum(["story", "body_location", "audio", "motion_visual", "review_board"]).optional()
+  }).optional()
 }) });

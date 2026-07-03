@@ -1,6 +1,7 @@
-import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { getLiveConfig } from "../liveConfig";
 import { buildLiveTokenTimes } from "../liveTokenPolicy";
+import { buildGeminiLiveSessionConfig } from "../liveSessionConfig";
 import { WRITE_TOOL_PROBE_SYSTEM_INSTRUCTION } from "./writeToolProbeCore";
 
 export async function mintGeminiLiveWriteToolProbeToken(now = Date.now()) {
@@ -16,14 +17,13 @@ export async function mintGeminiLiveWriteToolProbeToken(now = Date.now()) {
       httpOptions: { apiVersion: "v1alpha" },
       liveConnectConstraints: {
         model: config.model,
-        config: {
-          responseModalities: [Modality.AUDIO],
+        config: buildGeminiLiveSessionConfig({
+          voiceName: config.voiceName,
+          thinkingLevel: config.thinkingLevel,
           temperature: 0.1,
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voiceName } } },
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          systemInstruction: WRITE_TOOL_PROBE_SYSTEM_INSTRUCTION,
-          outputAudioTranscription: {}
-        }
+          tools: false,
+          systemInstruction: WRITE_TOOL_PROBE_SYSTEM_INSTRUCTION
+        })
       },
       lockAdditionalFields: []
     }

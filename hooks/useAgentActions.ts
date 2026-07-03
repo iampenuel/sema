@@ -3,20 +3,22 @@
 import type { Dispatch, RefObject } from "react";
 import { buildEvidencePacket, generateStructuredSummary } from "@/lib/packet/buildPacket";
 import { createEmptySession } from "@/lib/sema-session/defaults";
-import { getFolderReadout, getMissingDetails } from "@/lib/sema-session/selectors";
+import { getFolderReadout, getMissingDetails, getPacketReadinessDecision, packetNotReadyMessage } from "@/lib/sema-session/selectors";
 import type { SemaSessionAction } from "@/lib/sema-session/reducer";
 import type { DraftCapture, SemaSession, SignalFolderId } from "@/lib/sema-session/types";
 import { SEMAPHASE_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
 import type { AgentAction } from "@/lib/agent/agentTypes";
 import { downloadEvidencePacketPdf } from "@/lib/packet/pdfExport";
 import type { RuntimePhotoAttachment } from "@/lib/photo/types";
+import { buildLiveSessionContext } from "@/lib/live/buildLiveSessionContext";
 
 type Handlers = {
   dispatch: Dispatch<SemaSessionAction>;
   activePanelRef: RefObject<HTMLElement | null>;
   packetRef: RefObject<HTMLElement | null>;
   getSession: () => SemaSession;
-  onNavigate: (folder: SignalFolderId) => void;
+  onNavigate: (folder: SignalFolderId) => Promise<{ success: boolean; destination: string; failureReason?: string }> | { success: boolean; destination: string; failureReason?: string } | void;
+  onShowOverview?: () => Promise<{ success: boolean; destination: string; failureReason?: string }> | { success: boolean; destination: string; failureReason?: string } | void;
   onVoiceAction?: (action: AgentAction) => string;
   onOpenPhotoCapture?: () => void;
   onClearEphemeralPhotos?: () => void;
@@ -36,8 +38,9 @@ function summaryDraft(content: unknown): DraftCapture {
 }
 
 export function useAgentActions(handlers: Handlers) {
-  function focus(ref: RefObject<HTMLElement | null>) {
-    window.setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  async function navigationMessage(result: Awaited<ReturnType<Exclude<Handlers["onNavigate"], undefined>>>, success: string) {
+    if (!result || result.success) return success;
+    return `I changed the workspace state, but the destination did not finish moving into view (${result.failureReason ?? "unknown"}).`;
   }
 
   async function execute(action: AgentAction): Promise<string> {
@@ -47,15 +50,12 @@ export function useAgentActions(handlers: Handlers) {
       case "openSignalFolder": {
         const folder = action.payload?.folder as SignalFolderId | undefined;
         if (!folder) return "I could not identify that folder.";
-        handlers.onNavigate(folder);
-        handlers.dispatch({ type: "open_folder", folder });
-        focus(folder === "packet" ? handlers.packetRef : handlers.activePanelRef);
+        const result = await handlers.onNavigate(folder);
         const labels: Record<SignalFolderId, string> = { story: "Story", body_location: "Body/Location", audio: "Audio", motion_visual: "Motion/Visual", packet: "Evidence Packet" };
-        return `Opened the ${labels[folder]} Signal Folder.`;
+        return navigationMessage(result, `Opened the ${labels[folder]} Signal Folder.`);
       }
       case "showSignalFolderOverview":
-        document.getElementById("signal-folders-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        return "Returned to the signal folder overview.";
+        return navigationMessage(await handlers.onShowOverview?.(), "Returned to the signal folder overview.");
       case "readSignalFolder": {
         const folder = action.payload?.folder as SignalFolderId | undefined;
         return folder ? getFolderReadout(session, folder) : "I could not identify that folder.";
@@ -67,11 +67,10 @@ export function useAgentActions(handlers: Handlers) {
       case "readSafetyNote":
         return SEMAPHASE_SAFETY_NOTE;
       case "readCurrentPage":
-        return "This session workspace contains flexible Story, Body/Location, Audio, and Motion/Visual folders, including optional privacy-checked photo capture, followed by review, packet readiness, and packet preview.";
+        return `You are in the Sema session workspace on the ${buildLiveSessionContext(session).activeFolder} area. You can add observations to signal folders, review drafts, and prepare a clinician-ready evidence packet.`;
       case "openPhotoCapture":
-        handlers.onNavigate("motion_visual");
+        await handlers.onNavigate("motion_visual");
         handlers.onOpenPhotoCapture?.();
-        focus(handlers.activePanelRef);
         return "I opened the photo panel. Camera access starts only after you choose Allow camera.";
       case "readPhotoObservation": {
         const photo = session.photoObservations.find((item) => item.id === action.payload?.id) ?? session.photoObservations.at(-1);
@@ -83,6 +82,23 @@ export function useAgentActions(handlers: Handlers) {
         const summary = generateStructuredSummary(session.story.rawText);
         handlers.dispatch({ type: "set_structured_summary", summary, draft: summaryDraft(summary) });
         return "I drafted an organized story summary from patient-provided information. Review and approve it before packet preparation.";
+      }
+      case "updatePatientStory": {
+        const text = typeof action.payload?.text === "string" ? action.payload.text.trim() : "";
+        if (!text) return "I could not identify the Story wording to add.";
+        handlers.dispatch({
+          type: "add_draft_capture",
+          draft: {
+            id: `draft-live-story-${Date.now()}`,
+            targetFolder: "story",
+            title: "Live voice Story note",
+            content: text,
+            createdAt: new Date().toISOString(),
+            source: "voice_drafted",
+            status: "needs_review"
+          }
+        });
+        return "I added that as a Story draft for review. It is not packet-ready until you approve it.";
       }
       case "generateClinicianQuestions": {
         if (!session.story.rawText.trim()) return "Add patient-provided story text before drafting clinician questions.";
@@ -98,11 +114,14 @@ export function useAgentActions(handlers: Handlers) {
         handlers.dispatch({ type: "set_structured_summary", summary, draft: summaryDraft(summary) });
         return "I drafted clinician questions from the saved story. Review them before they become packet-ready.";
       }
-      case "prepareEvidencePacket":
+      case "prepareEvidencePacket": {
+        const readiness = getPacketReadinessDecision(session);
+        if (!readiness.ready) return packetNotReadyMessage(readiness);
         if (session.story.summaryStatus === "needs_review") return "The organized story summary still needs your review. Approve or discard it before preparing the packet.";
-        handlers.dispatch({ type: "set_packet", packet: buildEvidencePacket(session) });
-        focus(handlers.packetRef);
-        return "The evidence packet preview is ready from saved, approved session content.";
+        handlers.dispatch({ type: "set_packet", packet: buildEvidencePacket(session, { enforceReadiness: true }) });
+        const result = await handlers.onNavigate("packet");
+        return navigationMessage(result, "The evidence packet preview is ready from saved, approved session content.");
+      }
       case "saveDraftToFolder": {
         const id = action.payload?.id as string | undefined;
         if (!id) return "I could not identify that draft.";
@@ -125,6 +144,7 @@ export function useAgentActions(handlers: Handlers) {
         }
       }
       case "exportPacketPdf":
+        if (!getPacketReadinessDecision(session).ready) return packetNotReadyMessage(getPacketReadinessDecision(session));
         if (!session.packetDraft) return "Prepare a packet draft before exporting.";
         try {
           const filename = await downloadEvidencePacketPdf(session.packetDraft, handlers.getRuntimePhotoAttachments?.() ?? []);
@@ -144,6 +164,7 @@ export function useAgentActions(handlers: Handlers) {
         return "The selected audio observation was deleted.";
       }
       case "sharePacket":
+        if (!getPacketReadinessDecision(session).ready) return packetNotReadyMessage(getPacketReadinessDecision(session));
         return "Sharing is not connected in this local phase. The packet remains in this browser.";
       case "requestMicrophonePermission":
       case "startVoiceCapture":

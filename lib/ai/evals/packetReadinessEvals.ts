@@ -6,7 +6,9 @@ import { buildApprovedSessionContent, fingerprintApprovedSessionContent } from "
 import { buildEvidencePacket } from "@/lib/packet/buildPacket";
 import { createPacketReviewDraft } from "@/lib/packet/reviewDraft";
 import { PACKET_LIMITATIONS, PACKET_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
+import { createEmptySession } from "@/lib/sema-session/defaults";
 import { semaSessionReducer } from "@/lib/sema-session/reducer";
+import { getPacketReadinessDecision } from "@/lib/sema-session/selectors";
 import type { PacketAIDraft, SemaAIProviderMetadata } from "@/lib/ai/aiTypes";
 import { PACKET_APPROVED_CONTENT, PACKET_PATIENT_WORDS, PACKET_TEST_SESSION, SAFE_PACKET_AI_DRAFT } from "./fixtures/packetDraftFixture";
 
@@ -21,11 +23,43 @@ function approvedSession() {
   return semaSessionReducer(withReview, { type: "approve_packet_narrative_draft" });
 }
 
+function markNotApplicable(session = createEmptySession()) {
+  return (["body_location", "audio", "motion_visual"] as const).reduce((current, folder) => semaSessionReducer(current, { type: "mark_folder_not_applicable", folder }), session);
+}
+
+function savedStory(session = createEmptySession()) {
+  return semaSessionReducer(semaSessionReducer({ ...session, concernType: "other" }, { type: "update_story_raw_text", rawText: PACKET_PATIENT_WORDS }), { type: "save_story" });
+}
+
 function expectRejected(draft: PacketAIDraft) {
   assert.equal(validatePacketDraft(draft, PACKET_APPROVED_CONTENT).ok, false);
 }
 
 export const packetReadinessEvals: PacketReadinessEval[] = [
+  { name: "readiness blocks missing concern type", run: () => assert.equal(getPacketReadinessDecision(createEmptySession()).unresolvedRequirements.some((item) => item.key === "concern"), true) },
+  { name: "readiness blocks missing Story", run: () => assert.equal(getPacketReadinessDecision({ ...createEmptySession(), concernType: "other" }).nextRequiredDestination, "story") },
+  { name: "Story only is not packet ready", run: () => assert.equal(getPacketReadinessDecision(savedStory()).ready, false) },
+  { name: "optional folders require explicit Not applicable", run: () => {
+    const ready = getPacketReadinessDecision(markNotApplicable(savedStory()));
+    assert.equal(ready.ready, true);
+    assert.equal(ready.folders.audio, "not_applicable");
+  } },
+  { name: "respiratory concern requires saved audio", run: () => {
+    const base = markNotApplicable({ ...savedStory(), concernType: "cough_respiratory" });
+    const decision = getPacketReadinessDecision(base);
+    assert.equal(decision.ready, false);
+    assert.equal(decision.unresolvedRequirements.some((item) => item.key === "audio"), true);
+  } },
+  { name: "visible concern requires saved motion visual evidence", run: () => {
+    const base = markNotApplicable({ ...savedStory(), concernType: "skin_visible", bodyLocation: [{ id: "body", regionLabel: "skin", signalType: "rash_visible_change", source: "patient_stated" }], folderStatus: { ...savedStory().folderStatus, story: "saved", body_location: "saved", audio: "not_applicable", motion_visual: "not_applicable", packet: "empty" } });
+    const decision = getPacketReadinessDecision(base);
+    assert.equal(decision.ready, false);
+    assert.equal(decision.unresolvedRequirements.some((item) => item.key === "motion_visual"), true);
+  } },
+  { name: "pending Review Board blocks readiness", run: () => assert.equal(getPacketReadinessDecision({ ...PACKET_TEST_SESSION, story: { ...PACKET_TEST_SESSION.story, summaryStatus: "needs_review" } }).pendingReviewCount > 0, true) },
+  { name: "builder enforcement rejects not-ready session", run: () => assert.throws(() => buildEvidencePacket(createEmptySession(), { enforceReadiness: true }), /packet_not_ready/) },
+  { name: "builder enforcement accepts resolved session", run: () => assert.equal(buildEvidencePacket(markNotApplicable(savedStory()), { enforceReadiness: true }).label, "generated_from_patient_provided_information") },
+  { name: "packet AI request carries readiness decision", run: () => assert.equal(buildApprovedSessionContent(markNotApplicable(savedStory())).packetReadiness?.ready, true) },
   { name: "focused packet fixture is schema valid", run: () => assert.equal(PacketAIRequestSchema.safeParse({ approvedSessionContent: PACKET_APPROVED_CONTENT }).success, true) },
   { name: "packet request contains approved summary only", run: () => { const content = buildApprovedSessionContent(PACKET_TEST_SESSION); assert.equal(content.approvedSummary?.mainConcern, PACKET_TEST_SESSION.story.structuredSummary.mainConcern); } },
   { name: "unapproved summary is excluded from packet request", run: () => { const content = buildApprovedSessionContent({ ...PACKET_TEST_SESSION, story: { ...PACKET_TEST_SESSION.story, summaryStatus: "needs_review" } }); assert.equal(content.approvedSummary, undefined); } },

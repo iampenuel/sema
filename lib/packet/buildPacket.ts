@@ -1,5 +1,6 @@
 import type { EvidencePacket, SemaSession, StructuredSummary, TimelineItem } from "@/lib/sema-session/types";
 import { fingerprintSessionPacketSource } from "@/lib/packet/approvedContent";
+import { getPacketReadinessDecision } from "@/lib/sema-session/selectors";
 import { PACKET_LIMITATIONS, PACKET_SAFETY_NOTE } from "@/lib/safety/safetyCopy";
 import { toPacketAudioSignal } from "@/lib/voice/audioMetadata";
 
@@ -92,9 +93,15 @@ export function generateStructuredSummary(rawText: string): StructuredSummary {
   };
 }
 
-type PacketBuildOptions = { now?: Date; id?: string };
+type PacketBuildOptions = { now?: Date; id?: string; enforceReadiness?: boolean };
 
 export function buildEvidencePacket(session: SemaSession, options: PacketBuildOptions = {}): EvidencePacket {
+  if (options.enforceReadiness) {
+    const readiness = getPacketReadinessDecision(session);
+    if (!readiness.ready) {
+      throw Object.assign(new Error("packet_not_ready"), { code: "packet_not_ready", readiness });
+    }
+  }
   const approvedSummary = session.story.summaryStatus === "approved" ? session.story.structuredSummary : undefined;
   const approvedNarrative = session.packetNarrativeDraft?.status === "approved" && session.packetNarrativeDraft.contentFingerprint === fingerprintSessionPacketSource(session)
     ? session.packetNarrativeDraft

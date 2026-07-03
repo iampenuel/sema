@@ -10,6 +10,7 @@ export const AGENT_ACTION_REGISTRY: Record<AgentActionType, ActionMeta> = {
   readSafetyNote: { label: "Read safety note", description: "Read Sema's safety note and important disclaimers.", riskLevel: "read_only", requiresPermission: false },
   listMissingDetails: { label: "List missing details", description: "List details that may make the packet more useful.", riskLevel: "read_only", requiresPermission: false },
   generateStorySummary: { label: "Generate summary", description: "Draft an organized summary from patient-provided story text for review.", riskLevel: "write", requiresPermission: true },
+  updatePatientStory: { label: "Add Story note", description: "Create a reviewed Story draft from user-provided wording.", riskLevel: "write", requiresPermission: true },
   generateClinicianQuestions: { label: "Generate clinician questions", description: "Draft clinician questions from patient-provided information for review.", riskLevel: "write", requiresPermission: true },
   prepareEvidencePacket: { label: "Prepare packet", description: "Build an evidence packet draft from approved and saved signal folders.", riskLevel: "write", requiresPermission: true },
   saveDraftToFolder: { label: "Save draft", description: "Save reviewed draft content to a signal folder.", riskLevel: "write", requiresPermission: true },
@@ -33,7 +34,7 @@ export const AGENT_ACTION_REGISTRY: Record<AgentActionType, ActionMeta> = {
 // Device-access actions are intentionally absent. Model proposals cannot activate the microphone.
 export const MODEL_CALLABLE_AGENT_ACTIONS: AgentActionType[] = [
   "openSignalFolder", "showSignalFolderOverview", "readSignalFolder", "readCurrentPage", "readSafetyNote", "listMissingDetails",
-  "generateStorySummary", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder",
+  "generateStorySummary", "updatePatientStory", "generateClinicianQuestions", "prepareEvidencePacket", "saveDraftToFolder",
   "readPacketSection", "exportPacketPdf", "clearSession", "deleteAudio", "sharePacket", "openPhotoCapture", "readPhotoObservation"
 ];
 

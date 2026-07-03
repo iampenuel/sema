@@ -1,4 +1,5 @@
 import type { ConcernType, FolderStatus, SafetyFlag, SignalFolderId } from "@/lib/sema-session/types";
+import type { PacketReadinessDecision } from "@/lib/sema-session/selectors";
 
 export type AgentActionType =
   | "openSignalFolder"
@@ -8,6 +9,7 @@ export type AgentActionType =
   | "readSafetyNote"
   | "listMissingDetails"
   | "generateStorySummary"
+  | "updatePatientStory"
   | "generateClinicianQuestions"
   | "prepareEvidencePacket"
   | "saveDraftToFolder"
@@ -73,6 +75,7 @@ export type AgentContextSnapshot = {
   audioSignalCount: number;
   motionVisualNoteCount: number;
   hasPacketDraft: boolean;
+  packetReadiness?: Pick<PacketReadinessDecision, "ready" | "unresolvedRequirements" | "pendingReviewCount" | "packetStale" | "nextRequiredDestination">;
   missingDetails: string[];
   safetyFlags: SafetyFlag[];
   availableActions: AgentActionType[];

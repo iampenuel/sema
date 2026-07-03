@@ -5,6 +5,7 @@ import { DEMO_AUDIO_SIGNAL, DEMO_BODY_OBSERVATION, DEMO_CONCERN_TYPE, DEMO_STORY
 import { buildEvidencePacket, generateStructuredSummary } from "@/lib/packet/buildPacket";
 import { createEmptySession } from "@/lib/sema-session/defaults";
 import { semaSessionReducer } from "@/lib/sema-session/reducer";
+import { getPacketReadinessDecision } from "@/lib/sema-session/selectors";
 import { sanitizeAudioSignal, serializeSemaSession, toPacketAudioSignal } from "@/lib/voice/audioMetadata";
 import type {
   AudioSignal,
@@ -57,14 +58,14 @@ export function migrateSession(parsed: StoredSession): SemaSession {
       createdAt: String(photo.createdAt),
       width: Number.isFinite(photo.width) ? Number(photo.width) : 0,
       height: Number.isFinite(photo.height) ? Number(photo.height) : 0,
-      mimeType: String(photo.mimeType || "image/jpeg"),
+      mimeType: "image/jpeg",
       sizeBytes: Number.isFinite(photo.sizeBytes) ? Number(photo.sizeBytes) : 0,
       note: String(photo.note || ""),
       bodyLocation: photo.bodyLocation ? String(photo.bodyLocation) : undefined,
       tags: Array.isArray(photo.tags) ? photo.tags.map(String).slice(0, 10) : [],
       includeInPacket: photo.includeInPacket === true,
       source: "patient_camera_capture",
-      privacyGuardStatus: "allowed_on_device",
+      privacyGuardStatus: "passed_automated_content_screening",
       availability: "current_tab_only"
     }];
   });
@@ -115,7 +116,7 @@ export function migrateSession(parsed: StoredSession): SemaSession {
       audio: parsed.audioSignals?.length ? "saved" : "empty",
       packet: packetDraft ? "saved" : "empty",
       ...parsed.folderStatus,
-      motion_visual: motionVisualNotes.length || photoObservations.length ? "saved" : "optional"
+      motion_visual: motionVisualNotes.length || photoObservations.length ? "saved" : parsed.folderStatus?.motion_visual === "not_applicable" ? "not_applicable" : "empty"
     }
   };
 }
@@ -140,7 +141,11 @@ export function useSemaSession() {
   }, []);
 
   useEffect(() => {
-    if (hydratedRef.current) window.localStorage.setItem(storageKey, serializeSemaSession(session));
+    if (!hydratedRef.current) return;
+    const timeout = window.setTimeout(() => {
+      window.localStorage.setItem(storageKey, serializeSemaSession(session));
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, [session]);
 
   return useMemo(
@@ -176,8 +181,9 @@ export function useSemaSession() {
       updatePhotoObservation: (photo: PhotoObservationMetadata) => dispatch({ type: "update_photo_observation", photo }),
       removePhotoObservation: (id: string) => dispatch({ type: "remove_photo_observation", id }),
       preparePacket: () => {
+        if (!getPacketReadinessDecision(session).ready) return false;
         if (session.story.summaryStatus === "needs_review" || session.packetNarrativeDraft?.status === "needs_review") return false;
-        dispatch({ type: "set_packet", packet: buildEvidencePacket(session) });
+        dispatch({ type: "set_packet", packet: buildEvidencePacket(session, { enforceReadiness: true }) });
         return true;
       },
       loadDemo: () => {
@@ -188,7 +194,7 @@ export function useSemaSession() {
             ...createEmptySession(),
             concernType: DEMO_CONCERN_TYPE,
             activeFolder: "story",
-            folderStatus: { story: "needs_review", body_location: "saved", audio: "saved", motion_visual: "optional", packet: "empty" },
+            folderStatus: { story: "needs_review", body_location: "saved", audio: "saved", motion_visual: "not_applicable", packet: "empty" },
             story: { rawText: DEMO_STORY, structuredSummary: summary, summaryStatus: "needs_review" },
             bodyLocation: [DEMO_BODY_OBSERVATION],
             audioSignals: [DEMO_AUDIO_SIGNAL],

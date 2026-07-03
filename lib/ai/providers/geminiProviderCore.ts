@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { z } from "zod";
 import { AgentAIProposalSchema, PacketAIDraftSchema, StoryExtractionDraftSchema } from "../aiSchemas";
 import { SemaAIError } from "../errors";
@@ -52,6 +52,10 @@ function retryDelay(delayMs: number, signal?: AbortSignal) {
   });
 }
 
+function boundedTransientRetryDelay() {
+  return 350 + Math.floor(Math.random() * 250);
+}
+
 export class GeminiAIProviderCore implements SemaAIProvider {
   id = "gemini" as const;
   private client: GoogleGenAI;
@@ -81,6 +85,7 @@ export class GeminiAIProviderCore implements SemaAIProvider {
             abortSignal: controller.signal,
             responseMimeType: "application/json",
             responseJsonSchema: toGeminiJsonSchema(schema),
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             temperature: 0.1
           }
         });
@@ -91,7 +96,7 @@ export class GeminiAIProviderCore implements SemaAIProvider {
       } catch (error) {
         lastError = classifyGeminiError(error, Boolean(requestOptions?.signal?.aborted));
         if (!lastError.retryable || attempt === 1) break;
-        await retryDelay(lastError.retryAfterMs ?? 750, requestOptions?.signal);
+        await retryDelay(lastError.retryAfterMs ?? boundedTransientRetryDelay(), requestOptions?.signal);
       } finally {
         clearTimeout(timeout);
         requestOptions?.signal?.removeEventListener("abort", forwardAbort);

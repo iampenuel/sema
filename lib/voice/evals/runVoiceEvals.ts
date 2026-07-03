@@ -12,6 +12,7 @@ import { containsRawAudioFields, sanitizeAudioSignal, serializeSemaSession } fro
 import { buildRecordingBlob, classifyMicrophoneError, requestBrowserMicrophone, revokeObjectUrl, stopMediaTracks } from "@/lib/voice/mediaRecorder";
 import { createInitialVoiceState, voiceCaptureReducer } from "@/lib/voice/voiceReducer";
 import { detectVoiceSupport, selectSupportedMimeType } from "@/lib/voice/voiceSupport";
+import { LIVE_MICROPHONE_CONSTRAINTS, LIVE_POST_PLAYBACK_COOLDOWN_MS, canForwardPcm } from "@/lib/live/liveTurnState";
 
 type Test = { name: string; run: () => void | Promise<void> };
 
@@ -76,6 +77,11 @@ const tests: Test[] = [
   { name: "model-callable actions exclude microphone access", run: () => assert.equal(MODEL_CALLABLE_AGENT_ACTIONS.includes("startVoiceCapture"), false) },
   { name: "unsafe cough interpretation is blocked", run: () => assert.ok(detectUnsafeRequest("What does this cough mean?").some((flag) => flag.type === "audio_classification_request")) },
   { name: "unsafe recording seriousness request is blocked", run: () => assert.ok(detectUnsafeRequest("Does this recording sound serious?").length > 0) },
+  { name: "Live half-duplex blocks PCM during assistant speech", run: () => assert.equal(canForwardPcm("assistant_speaking"), false) },
+  { name: "Live half-duplex blocks PCM during cooldown", run: () => assert.equal(canForwardPcm("post_playback_cooldown"), false) },
+  { name: "Live half-duplex permits PCM while listening", run: () => assert.equal(canForwardPcm("listening"), true) },
+  { name: "Live microphone constraints are ideal not exact", run: () => { assert.match(JSON.stringify(LIVE_MICROPHONE_CONSTRAINTS), /ideal/); assert.doesNotMatch(JSON.stringify(LIVE_MICROPHONE_CONSTRAINTS), /exact/); } },
+  { name: "Live echo cooldown stays short", run: () => assert.ok(LIVE_POST_PLAYBACK_COOLDOWN_MS >= 300 && LIVE_POST_PLAYBACK_COOLDOWN_MS <= 600) },
   { name: "cancellation does not mutate SemaSession", run: () => { const session = approvedSession(); voiceCaptureReducer(createInitialVoiceState(), { type: "cancelled" }); assert.deepEqual(session, approvedSession()); } },
   { name: "provider availability is irrelevant to browser recording support", run: () => assert.equal(detectVoiceSupport({ navigator: { mediaDevices: { getUserMedia: async () => fakeStream().stream } } as unknown as Pick<Navigator, "mediaDevices">, MediaRecorder: class { static isTypeSupported() { return false; } } as unknown as typeof MediaRecorder }).mediaRecorder, true) }
 ];

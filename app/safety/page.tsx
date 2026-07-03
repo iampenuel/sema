@@ -4,7 +4,17 @@ import { SemaShell } from "@/components/layout/SemaShell";
 import { IMPORTANT_DISCLAIMERS_LABEL, PRIVACY_DISCLOSURES } from "@/lib/safety/safetyCopy";
 
 const does = ["Organize patient-provided observations.", "Help users remember details.", "Generate a shareable evidence packet.", "Encourage licensed clinician review."];
-const doesNot = ["Diagnose or identify a condition.", "Treat, prescribe, or recommend medication.", "Triage or determine emergency severity.", "Tell users they are safe, unsafe, or should delay care.", "Classify audio or body/location notes as disease or proof."];
+const doesNot = ["Diagnose or identify a condition.", "Treat, prescribe, or recommend medication.", "Triage or determine emergency severity.", "Tell users they are safe, unsafe, or should delay care.", "Classify audio or body/location notes as disease or proof.", "Analyze photos medically or guarantee automated content screening is correct."];
+
+function renderDisclosureDetail(detail: string) {
+  return detail.split("\n\n").map((paragraph) => (
+    <p key={paragraph} className="mt-2 text-sm leading-6 text-muted">
+      {paragraph.split(/(\*\*[^*]+\*\*)/g).map((part) => part.startsWith("**") && part.endsWith("**")
+        ? <strong key={part} className="font-semibold text-ink">{part.slice(2, -2)}</strong>
+        : part)}
+    </p>
+  ));
+}
 
 export default function SafetyPage() {
   const privacyIcons = [Database, Sparkles, Mic, Mic, FileDown, ShieldCheck];
@@ -65,7 +75,7 @@ export default function SafetyPage() {
                     <Icon className="h-4 w-4 text-sema-blue" aria-hidden="true" />
                     {item.title}
                   </h3>
-                  <p className="mt-2 text-sm leading-6 text-muted">{item.detail}</p>
+                  {renderDisclosureDetail(item.detail)}
                 </article>
               );
             })}

@@ -1,8 +1,22 @@
 import type { AgentAction } from "@/lib/agent/agentTypes";
+import type { SemaLiveThinkingLevel } from "./liveConfigCore";
+import type { LiveTurnState } from "./liveTurnState";
+import type { LiveOutputState } from "./liveOutputState";
 
 export type LiveConnectionState =
   | "idle"
   | "consent_required"
+  | "player_preparing"
+  | "token_requesting"
+  | "socket_connecting"
+  | "setup_sending"
+  | "setup_waiting"
+  | "intro_requesting"
+  | "intro_waiting_for_audio"
+  | "intro_playing"
+  | "intro_drained"
+  | "ready_without_microphone"
+  | "completed_one_turn"
   | "requesting_microphone"
   | "requesting_token"
   | "connecting"
@@ -12,12 +26,24 @@ export type LiveConnectionState =
   | "speaking"
   | "interrupted"
   | "awaiting_confirmation"
+  | "action_running"
   | "reconnecting"
   | "ending"
   | "ended"
   | "rate_limited"
   | "unavailable"
   | "error";
+
+export type SemaIntroductionState =
+  | "not_started"
+  | "waiting_for_connection"
+  | "requesting"
+  | "buffering"
+  | "speaking"
+  | "draining"
+  | "cooldown"
+  | "delivered"
+  | "failed_text_available";
 
 export type SemaLiveProviderId = "local_voice" | "gemini_live";
 
@@ -63,6 +89,9 @@ export type LiveRuntimeState = {
   reconnectAttempts: number;
   sessionStartedAt?: number;
   activeGeneration: number;
+  turnState: LiveTurnState;
+  outputState: LiveOutputState;
+  voiceNotice?: string;
 };
 
 export type LivePublicStatus = {
@@ -71,6 +100,7 @@ export type LivePublicStatus = {
   provider: "gemini_live";
   model: string;
   voiceName: string;
+  thinkingLevel: SemaLiveThinkingLevel;
   maxSessionMinutes: number;
   publicDemoTokenEnabled: boolean;
   reason?: string;
@@ -81,15 +111,16 @@ export type LiveTokenResponse = {
   expiresAt: string;
   model: string;
   voiceName: string;
+  thinkingLevel: SemaLiveThinkingLevel;
 };
 
 export type LiveProviderEvent =
   | { type: "open" }
   | { type: "close"; reason?: string }
   | { type: "error"; code: LiveErrorCode; message: string }
-  | { type: "audio"; data: string; generation: number }
+  | { type: "audio"; data: string; generation: number; responseEpoch?: number; partIndex?: number }
   | { type: "input_transcript"; text: string; final: boolean }
-  | { type: "output_transcript"; text: string; final: boolean }
+  | { type: "output_transcript"; text: string; final: boolean; responseEpoch?: number; partIndex?: number }
   | { type: "tool_call"; call: LiveToolCall }
   | { type: "interrupted" }
   | { type: "generation_complete" }

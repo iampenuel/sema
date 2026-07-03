@@ -26,11 +26,11 @@ export const PRIVACY_DISCLOSURES = [
   },
   {
     title: "AI processing",
-    detail: "When Gemini features are configured and used, story text, agent messages with limited session context, and approved packet content may be sent to Google Gemini for processing. Sema's diagnostic logs do not include that content."
+    detail: "When Gemini features are configured and used, story text, agent messages with limited session context, and approved packet content may be sent to Google Gemini for processing. Photos are not sent to Gemini. Sema's diagnostic logs do not include story, packet, or prompt content."
   },
   {
     title: "Live voice",
-    detail: "Live microphone audio is sent to Google Gemini for real-time processing only after you consent. Sema does not persist Live audio, and the Live transcript remains in page memory and is not automatically added to your saved session."
+    detail: "Live microphone audio is sent to Google Gemini for real-time processing only after you consent. Sema does not persist Live audio. Live transcript and voice-output diagnostics remain in page memory and are not automatically added to your saved session."
   },
   {
     title: "Browser recording and dictation",
@@ -41,8 +41,8 @@ export const PRIVACY_DISCLOSURES = [
     detail: "Evidence packet PDFs are generated in your browser from the prepared packet and downloaded to your device. The rest of the webpage and Live transcript are not included."
   },
   {
-    title: "Current phase boundaries",
-    detail: "Photo capture and camera access start only after you choose Allow camera. Sampled preview frames are checked on this device and are not uploaded for the privacy check. The safeguard can make mistakes, so blocked and uncertain frames cannot be captured. Approved raw photos remain in current-tab memory only; approved metadata and user-authored notes may be stored locally, and opted-in photos may enter a PDF generated in your browser. Images are not sent to Gemini and Sema does not medically analyze them. Sema has no user accounts, account-based cloud clinical record, or EHR integration."
+    title: "Optional photos and Azure screening",
+    detail: "Photo capture begins only after you review the screening disclosure and grant browser camera permission. Sema does not upload live preview frames. After you select **Capture**, one sanitized temporary image is sent through Sema’s server to Microsoft Azure AI Content Safety to screen for potentially sensitive or private imagery.\n\nThe image leaves your device for processing by Microsoft. According to Microsoft’s documentation, Content Safety inputs are not stored during detection, are not used to train the service, and are processed in the selected Azure resource region. Automated screening can make mistakes.\n\nApproved photos remain in the current browser tab only. Approved metadata and notes you write may be stored locally, and photos you choose to include may appear in a browser-generated PDF. Sema does not medically analyze photos and does not provide user accounts, clinical records, or EHR integration."
   }
 ] as const;
 

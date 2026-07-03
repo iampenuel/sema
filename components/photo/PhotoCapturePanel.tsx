@@ -1,219 +1,278 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- reviewed photos use ephemeral blob URLs that must not enter Next image optimization */
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, Check, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
-import { initialPhotoCaptureState, photoCaptureReducer } from "@/lib/photo/captureMachine";
-import { PHOTO_PRIVACY_CONFIG } from "@/lib/photo/config";
-import { canCapturePhoto } from "@/lib/photo/privacyPolicy";
+import { fetchPhotoModerationStatus, moderatePhotoWithAzure } from "@/lib/photo/moderationClient";
 import { clearCanvas, sanitizePhotoCapture } from "@/lib/photo/sanitize";
-import type { EphemeralPhotoDraft, PhotoObservationMetadata, PhotoPrivacyProvider } from "@/lib/photo/types";
-import { createProductionPhotoPrivacyProvider } from "@/lib/photo/workerProvider";
+import type { CameraFacingEvidence, CameraFacingMode, EphemeralPhotoDraft, PhotoCaptureStatus, PhotoModerationStatus, PhotoObservationMetadata, RequestedCameraFacingMode } from "@/lib/photo/types";
 
 const bodyRegions = ["Right wrist / hand", "Left wrist / hand", "Right arm", "Left arm", "Right leg", "Left leg", "Chest / breathing", "Skin area", "Other"];
 const neutralTags = ["Appearance", "Movement", "Change over time", "Size reference"];
 
+const preferredCameraConstraints: MediaStreamConstraints = {
+  video: {
+    facingMode: { ideal: "user" },
+    width: { ideal: 640 },
+    height: { ideal: 480 },
+    frameRate: { ideal: 24, max: 30 }
+  },
+  audio: false
+};
+
+const fallbackCameraConstraints: MediaStreamConstraints = { video: true, audio: false };
+
 type Props = {
   onApprove: (draft: EphemeralPhotoDraft, metadata: PhotoObservationMetadata) => void;
   onClose: () => void;
-  providerFactory?: () => PhotoPrivacyProvider;
 };
 
-export function PhotoCapturePanel({ onApprove, onClose, providerFactory = createProductionPhotoPrivacyProvider }: Props) {
-  const [state, dispatch] = useReducer(photoCaptureReducer, initialPhotoCaptureState);
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorCode: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(errorCode)), timeoutMs);
+    promise.then((value) => {
+      window.clearTimeout(timeout);
+      resolve(value);
+    }, (error) => {
+      window.clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
+function waitForMetadata(video: HTMLVideoElement) {
+  if (video.readyState >= 1) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("loadedmetadata", onLoaded);
+      video.removeEventListener("error", onError);
+    };
+    const onLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("camera_metadata_error"));
+    };
+    video.addEventListener("loadedmetadata", onLoaded, { once: true });
+    video.addEventListener("error", onError, { once: true });
+  });
+}
+
+function waitForFirstVideoFrame(video: HTMLVideoElement) {
+  return new Promise<void>((resolve) => {
+    if ("requestVideoFrameCallback" in video) {
+      video.requestVideoFrameCallback(() => resolve());
+      return;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+function normalizeFacingMode(value: unknown): CameraFacingMode {
+  return value === "user" || value === "environment" || value === "left" || value === "right" ? value : "unknown";
+}
+
+export function shouldMirrorPreview(evidence: CameraFacingEvidence) {
+  if (evidence.reportedFacingMode === "environment" || evidence.requestedFacingMode === "environment") return false;
+  if (evidence.reportedFacingMode === "user") return true;
+  if (evidence.requestedFacingMode === "user" && evidence.reportedFacingMode === "unknown") return true;
+  if (evidence.reportedFacingMode === "unknown") return true;
+  return false;
+}
+
+function statusMessage(status: PhotoCaptureStatus) {
+  if (status === "checking_capture") return "Checking this photo before adding it…";
+  if (status === "reviewing") return "Photo check complete. Review the photo before adding it.";
+  if (status === "moderation_uncertain") return "Sema could not confidently approve this photo. Try taking it again with a clearer view, or continue using text or the body map.";
+  if (status === "moderation_blocked") return "Photo blocked for privacy\n\nAutomated screening flagged this photo as potentially sensitive, so Sema cannot add it. You can retake the photo or continue using text or the body map.";
+  if (status === "moderation_unavailable") return "Photo screening is unavailable, so this image cannot be added right now. You can continue using text or the body map.";
+  if (status === "requesting_permission") return "Opening camera…";
+  if (status === "previewing") return "Camera ready. Capture one photo when you are ready.";
+  if (status === "permission_denied") return "Camera permission was not granted. You can continue with text or the body map.";
+  if (status === "camera_unavailable") return "Camera capture is unavailable. You can continue with text or the body map.";
+  return "";
+}
+
+export function PhotoCapturePanel({ onApprove, onClose }: Props) {
+  const [status, setStatus] = useState<PhotoCaptureStatus>("azure_disclosure_required");
+  const [moderationStatus, setModerationStatus] = useState<PhotoModerationStatus>({ available: false, provider: "azure_content_safety" });
+  const [moderationStatusLoaded, setModerationStatusLoaded] = useState(false);
+  const [disclosureAccepted, setDisclosureAccepted] = useState(false);
+  const [mirrorPreview, setMirrorPreview] = useState(true);
+  const [draft, setDraft] = useState<EphemeralPhotoDraft | null>(null);
   const [note, setNote] = useState("");
   const [bodyLocation, setBodyLocation] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [includeInPacket, setIncludeInPacket] = useState(false);
-  const [developmentSimulation, setDevelopmentSimulation] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [moderationInFlight, setModerationInFlight] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const providerRef = useRef<PhotoPrivacyProvider | null>(null);
-  const samplingRef = useRef<number | null>(null);
-  const inferenceRef = useRef(false);
-  const visibilityEpochRef = useRef(0);
+  const activeModerationRef = useRef(false);
   const mountedRef = useRef(true);
 
   const stopStream = useCallback(() => {
-    if (samplingRef.current !== null) window.clearInterval(samplingRef.current);
-    samplingRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
-    dispatch({ type: "STREAM_STOPPED" });
   }, []);
 
-  const disposeProvider = useCallback(() => {
-    void providerRef.current?.dispose();
-    providerRef.current = null;
-  }, []);
+  const discardDraft = useCallback((close = false) => {
+    if (draft) URL.revokeObjectURL(draft.objectUrl);
+    setDraft(null);
+    setNote("");
+    setBodyLocation("");
+    setTags([]);
+    setIncludeInPacket(false);
+    setErrorText(null);
+    stopStream();
+    setStatus(close ? "discarded" : "azure_disclosure_required");
+    if (close) onClose();
+  }, [draft, onClose, stopStream]);
 
   useEffect(() => {
     mountedRef.current = true;
-    dispatch({ type: "OPEN" });
-    const onVisibility = () => {
-      const visible = !document.hidden;
-      visibilityEpochRef.current += 1;
-      inferenceRef.current = false;
-      dispatch({ type: "VISIBILITY", visible });
-    };
-    document.addEventListener("visibilitychange", onVisibility);
+    const controller = new AbortController();
+    fetchPhotoModerationStatus(controller.signal)
+      .then((result) => {
+        if (!mountedRef.current) return;
+        setModerationStatus(result);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setModerationStatus({ available: false, provider: "azure_content_safety" });
+      })
+      .finally(() => {
+        if (mountedRef.current) setModerationStatusLoaded(true);
+      });
     return () => {
       mountedRef.current = false;
-      document.removeEventListener("visibilitychange", onVisibility);
+      controller.abort();
       stopStream();
-      disposeProvider();
+      if (draft) URL.revokeObjectURL(draft.objectUrl);
     };
-  }, [disposeProvider, stopStream]);
+  }, [draft, stopStream]);
 
   async function startCamera() {
+    if (!disclosureAccepted || !moderationStatus.available) return;
     if (!navigator.mediaDevices?.getUserMedia) {
-      dispatch({ type: "CAMERA_UNAVAILABLE" });
+      setStatus("camera_unavailable");
       return;
     }
-    dispatch({ type: "REQUEST_PERMISSION" });
+    setErrorText(null);
+    setStatus("requesting_permission");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      let stream: MediaStream;
+      let requested: RequestedCameraFacingMode = "user";
+      try {
+        stream = await withTimeout(navigator.mediaDevices.getUserMedia(preferredCameraConstraints), 8_000, "camera_permission_timeout");
+      } catch (error) {
+        if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError")) throw error;
+        requested = "unspecified";
+        stream = await withTimeout(navigator.mediaDevices.getUserMedia(fallbackCameraConstraints), 6_000, "camera_fallback_timeout");
+      }
       if (!mountedRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
       streamRef.current = stream;
       const track = stream.getVideoTracks()[0];
+      const facing = normalizeFacingMode(track?.getSettings?.().facingMode);
+      setMirrorPreview(shouldMirrorPreview({ requestedFacingMode: requested, reportedFacingMode: facing }));
       track?.addEventListener("ended", () => {
         stopStream();
-        dispatch({ type: "CAMERA_UNAVAILABLE" });
+        setStatus("camera_unavailable");
       }, { once: true });
-      dispatch({ type: "PERMISSION_GRANTED" });
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      if (!videoRef.current) throw new Error("camera_preview_unavailable");
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-      dispatch({ type: "MODEL_LOADING" });
-      disposeProvider();
-      const provider = providerFactory();
-      providerRef.current = provider;
-      setDevelopmentSimulation(provider.isDevelopmentSimulation === true);
-      await provider.load();
-      if (!mountedRef.current) return;
-      dispatch({ type: "MODEL_READY" });
+      const video = videoRef.current;
+      if (!video) throw new Error("camera_preview_unavailable");
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      await withTimeout(waitForMetadata(video), 4_000, "camera_metadata_timeout");
+      await video.play().catch(() => undefined);
+      await withTimeout(waitForFirstVideoFrame(video), 4_000, "camera_first_frame_timeout");
+      setStatus("previewing");
     } catch (error) {
       stopStream();
-      disposeProvider();
-      if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError")) dispatch({ type: "PERMISSION_DENIED" });
-      else if (error instanceof DOMException && ["NotFoundError", "NotReadableError", "OverconstrainedError"].includes(error.name)) dispatch({ type: "CAMERA_UNAVAILABLE" });
-      else dispatch({ type: "MODEL_ERROR" });
+      if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError")) setStatus("permission_denied");
+      else setStatus("camera_unavailable");
     }
   }
-
-  const samplePreview = useCallback(async () => {
-    const video = videoRef.current;
-    const provider = providerRef.current;
-    if (!video || !provider || inferenceRef.current || document.hidden || video.readyState < 2 || !streamRef.current?.active) return;
-    inferenceRef.current = true;
-    const visibilityEpoch = visibilityEpochRef.current;
-    dispatch({ type: "INFERENCE_STARTED" });
-    const canvas = document.createElement("canvas");
-    canvas.width = PHOTO_PRIVACY_CONFIG.previewLongEdge;
-    canvas.height = PHOTO_PRIVACY_CONFIG.previewLongEdge;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    try {
-      if (!context) throw new Error("canvas_unavailable");
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const result = await provider.evaluate(canvas);
-      if (mountedRef.current && !document.hidden && visibilityEpoch === visibilityEpochRef.current) dispatch({ type: "PREVIEW_RESULT", result });
-    } catch {
-      if (mountedRef.current) dispatch({ type: "MODEL_ERROR" });
-    } finally {
-      inferenceRef.current = false;
-      clearCanvas(canvas);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!state.modelReady || !state.streamActive || !state.pageVisible) return;
-    void samplePreview();
-    samplingRef.current = window.setInterval(() => void samplePreview(), PHOTO_PRIVACY_CONFIG.sampleIntervalMs);
-    return () => {
-      if (samplingRef.current !== null) window.clearInterval(samplingRef.current);
-      samplingRef.current = null;
-    };
-  }, [samplePreview, state.modelReady, state.pageVisible, state.streamActive]);
-
-  useEffect(() => {
-    const latest = state.latestResult;
-    if (!latest || latest.decision !== "allowed") return;
-    const timeout = window.setTimeout(() => dispatch({
-      type: "PREVIEW_RESULT",
-      result: { ...latest, decision: "uncertain", reasonCode: "result_stale", evaluatedAt: Date.now() }
-    }), PHOTO_PRIVACY_CONFIG.resultFreshnessMs + 1);
-    return () => window.clearTimeout(timeout);
-  }, [state.latestResult]);
-
-  const captureAllowed = useMemo(() => canCapturePhoto(
-    { allowedStreak: state.allowedStreak, latest: state.latestResult },
-    state.latestResult?.evaluatedAt ?? 0,
-    { modelReady: state.modelReady, permissionGranted: state.permissionGranted, streamActive: state.streamActive, inferenceRunning: state.inferenceRunning, pageVisible: state.pageVisible, captureProcessing: state.captureProcessing }
-  ), [state]);
 
   async function capture() {
     const video = videoRef.current;
-    const provider = providerRef.current;
-    if (!captureAllowed || !video || !provider) return;
-    dispatch({ type: "CAPTURE_STARTED" });
+    if (!video || activeModerationRef.current || status !== "previewing") return;
+    activeModerationRef.current = true;
+    setModerationInFlight(true);
+    setStatus("checking_capture");
+    setErrorText(null);
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
+    const context = canvas.getContext("2d", { alpha: false });
+    let objectUrl: string | undefined;
     try {
       if (!context || !canvas.width || !canvas.height) throw new Error("frame_invalid");
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const result = await provider.evaluate(canvas);
-      if (result.decision !== "allowed" || result.reasonCode !== "clear") {
-        dispatch({ type: "CAPTURE_REJECTED", result });
+      const sanitized = await sanitizePhotoCapture(canvas, canvas.width, canvas.height);
+      const runtimePhotoId = `photo-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+      const result = await moderatePhotoWithAzure({ blob: sanitized.blob, runtimePhotoId, consent: true });
+      if (!mountedRef.current) return;
+      if (result.outcome !== "allowed") {
+        setStatus(result.outcome === "uncertain" ? "moderation_uncertain" : result.outcome === "blocked" ? "moderation_blocked" : "moderation_unavailable");
+        setErrorText(result.message);
         return;
       }
-      const sanitized = await sanitizePhotoCapture(canvas, canvas.width, canvas.height);
-      const id = `photo-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-      const objectUrl = URL.createObjectURL(sanitized.blob);
-      const draft: EphemeralPhotoDraft = {
-        id,
-        createdAt: new Date().toISOString(),
-        ...sanitized,
+      objectUrl = URL.createObjectURL(sanitized.blob);
+      const createdAt = new Date().toISOString();
+      const nextDraft: EphemeralPhotoDraft = {
+        id: runtimePhotoId,
+        createdAt,
+        width: sanitized.width,
+        height: sanitized.height,
+        mimeType: sanitized.mimeType,
+        sizeBytes: sanitized.sizeBytes,
         note: "",
+        bodyLocation: undefined,
         tags: [],
         includeInPacket: false,
         source: "patient_camera_capture",
-        privacyGuardStatus: "allowed_on_device",
+        privacyGuardStatus: "passed_automated_content_screening",
         availability: "current_tab_only",
         blob: sanitized.blob,
         objectUrl,
-        privacyDecision: "allowed",
-        privacyModelVersion: result.modelVersion,
+        moderationProvider: "azure_content_safety",
         status: "needs_review"
       };
+      objectUrl = undefined;
       stopStream();
-      disposeProvider();
-      dispatch({ type: "REVIEW_READY", draft });
+      setDraft(nextDraft);
+      setStatus("reviewing");
     } catch {
-      dispatch({ type: "MODEL_ERROR" });
+      setStatus("moderation_unavailable");
+      setErrorText(statusMessage("moderation_unavailable"));
     } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      activeModerationRef.current = false;
+      setModerationInFlight(false);
       clearCanvas(canvas);
     }
   }
 
-  function discardDraft(close = false) {
-    if (state.draft) URL.revokeObjectURL(state.draft.objectUrl);
-    stopStream();
-    disposeProvider();
-    dispatch({ type: "DISCARDED" });
-    if (close) onClose();
-  }
-
   function approve() {
-    if (!state.draft) return;
-    dispatch({ type: "SAVE_STARTED" });
-    const approved: EphemeralPhotoDraft = { ...state.draft, note: note.trim(), bodyLocation: bodyLocation || undefined, tags, includeInPacket, status: "approved" };
+    if (!draft) return;
+    setStatus("saving");
+    const approved: EphemeralPhotoDraft = {
+      ...draft,
+      note: note.trim(),
+      bodyLocation: bodyLocation || undefined,
+      tags,
+      includeInPacket,
+      status: "approved"
+    };
     const metadata: PhotoObservationMetadata = {
       id: approved.id,
       createdAt: approved.createdAt,
@@ -230,41 +289,49 @@ export function PhotoCapturePanel({ onApprove, onClose, providerFactory = create
       availability: approved.availability
     };
     onApprove(approved, metadata);
-    dispatch({ type: "SAVED" });
+    setStatus("saved");
     onClose();
   }
 
-  const blocked = state.status === "preview_blocked" || state.status === "preview_uncertain";
-  const unavailable = state.status === "error";
-  const privacyLabel = unavailable ? "Privacy check unavailable" : blocked ? "Camera paused for privacy" : state.status === "preview_allowed" ? "Ready to capture" : "Privacy check in progress";
+  const disclosureUnavailable = moderationStatusLoaded && !moderationStatus.available;
+  const message = errorText ?? statusMessage(status);
 
   return (
     <section className="mt-5 rounded-lg border border-sema-border bg-[#f8fbfd] p-4 sm:p-5" aria-labelledby="photo-capture-title">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-bold text-sema-blue">ON-DEVICE PRIVACY CHECK</p>
+          <p className="text-xs font-bold text-sema-blue">AZURE-MODERATED PHOTO CAPTURE</p>
           <h3 id="photo-capture-title" className="mt-1 text-xl font-bold text-ink">Take a photo</h3>
         </div>
         <button type="button" onClick={() => discardDraft(true)} className="min-h-11 rounded-md px-3 text-sm font-semibold text-sema-slate hover:bg-white" aria-label="Close photo capture"><X className="h-5 w-5" aria-hidden="true" /></button>
       </div>
-      <p aria-live="polite" className="sr-only">{state.announcement}</p>
-      {developmentSimulation && <p className="mt-3 rounded-md border border-[#e3c6a0] bg-[#fff8ec] p-3 text-xs font-bold text-[#7b5a20]">Development simulation only · Not real privacy protection</p>}
+      <p aria-live="polite" className="sr-only">{message}</p>
 
-      {state.status === "consent_required" || state.status === "idle" ? (
+      {status === "azure_disclosure_required" || status === "idle" ? (
         <div className="mt-4 rounded-md border border-[#c5dbe9] bg-white p-4">
-          <p className="text-sm leading-6 text-sema-slate">Sema checks camera frames on this device to help prevent private images from being captured. This safeguard may make mistakes. Camera frames are not uploaded for this privacy check.</p>
+          <p className="text-sm leading-6 text-sema-slate">Photo capture is optional. After you take a photo, Sema will send one temporary copy to Microsoft Azure AI Content Safety to screen for potentially sensitive content. The image leaves this device for processing. Sema does not save moderation copies, and automated screening can make mistakes.</p>
+          <label className="mt-4 flex min-h-11 items-start gap-3 rounded-md border border-sema-border bg-[#f8fbfd] p-3 text-sm text-ink">
+            <input type="checkbox" checked={disclosureAccepted} onChange={(event) => setDisclosureAccepted(event.target.checked)} className="mt-1" />
+            <span>I understand that a captured photo will be sent to Microsoft Azure for automated content-safety screening.</span>
+          </label>
+          {disclosureUnavailable && <FallbackMessage message="Photo screening is unavailable, so camera photo capture is disabled right now. You can continue using text, the body map, or motion notes." />}
           <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" onClick={startCamera} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-sema-blue px-4 py-2 text-sm font-semibold text-white"><Camera className="h-4 w-4" aria-hidden="true" />Allow camera</button>
-            <button type="button" onClick={() => discardDraft(true)} className="min-h-11 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-slate">Continue without a photo</button>
+            <button type="button" onClick={() => discardDraft(true)} className="min-h-11 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-slate">Use text or body map instead</button>
+            <button type="button" onClick={startCamera} disabled={!disclosureAccepted || !moderationStatus.available} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-sema-blue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-sema-slate/40"><Camera className="h-4 w-4" aria-hidden="true" />Continue to camera</button>
           </div>
         </div>
-      ) : state.status === "permission_denied" || state.status === "camera_unavailable" ? (
-        <FallbackMessage message="Camera capture is unavailable. You can continue with text or the body map." />
-      ) : state.status === "reviewing" && state.draft ? (
+      ) : status === "permission_denied" || status === "camera_unavailable" || status === "moderation_uncertain" || status === "moderation_blocked" || status === "moderation_unavailable" ? (
         <div className="mt-4">
-          <p className="rounded-md border border-sema-border bg-white p-3 text-sm text-sema-slate">Review this photo before adding it. Sema does not analyze photos for disease or diagnosis.</p>
-          {/* object URLs remain current-tab memory only */}
-          <img src={state.draft.objectUrl} alt="Photo awaiting your review" className="mt-4 max-h-[28rem] w-full rounded-md border border-sema-border bg-black object-contain" />
+          <FallbackMessage message={message || "Photo capture is unavailable. You can continue with text or the body map."} />
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button type="button" onClick={() => { setStatus("azure_disclosure_required"); setErrorText(null); }} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold"><RotateCcw className="h-4 w-4" aria-hidden="true" />Retake</button>
+            <button type="button" onClick={() => discardDraft(true)} className="min-h-11 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-slate">Use text or body map instead</button>
+          </div>
+        </div>
+      ) : status === "reviewing" && draft ? (
+        <div className="mt-4">
+          <p className="rounded-md border border-sema-border bg-white p-3 text-sm text-sema-slate">This photo passed automated content screening. Sema has not medically analyzed it.</p>
+          <img src={draft.objectUrl} alt="Photo awaiting your review" className="mt-4 max-h-[28rem] w-full rounded-md border border-sema-border bg-black object-contain" />
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="sm:col-span-2"><span className="text-sm font-semibold text-ink">Neutral note, optional</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} className="mt-1 min-h-20 w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm" placeholder="Describe only what you noticed." /></label>
             <label><span className="text-sm font-semibold text-ink">Body location, optional</span><select value={bodyLocation} onChange={(event) => setBodyLocation(event.target.value)} className="mt-1 w-full rounded-md border border-sema-border bg-white px-3 py-2 text-sm"><option value="">Not selected</option>{bodyRegions.map((region) => <option key={region}>{region}</option>)}</select></label>
@@ -274,20 +341,23 @@ export function PhotoCapturePanel({ onApprove, onClose, providerFactory = create
           <p className="mt-2 text-xs font-semibold text-sema-blue">Photo available in this tab only</p>
           <div className="mt-4 flex flex-wrap gap-3">
             <button type="button" onClick={approve} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-sema-blue px-4 py-2 text-sm font-semibold text-white"><Check className="h-4 w-4" aria-hidden="true" />I reviewed this photo and want to add it to this Sema session.</button>
-            <button type="button" onClick={() => { discardDraft(); dispatch({ type: "RESET_PREVIEW" }); }} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold"><RotateCcw className="h-4 w-4" aria-hidden="true" />Retake</button>
+            <button type="button" onClick={() => discardDraft()} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold"><RotateCcw className="h-4 w-4" aria-hidden="true" />Retake</button>
             <button type="button" onClick={() => discardDraft(true)} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#d6a9a9] bg-white px-4 py-2 text-sm font-semibold text-[#9b4141]"><Trash2 className="h-4 w-4" aria-hidden="true" />Delete</button>
           </div>
         </div>
       ) : (
         <div className="mt-4">
           <div className="relative overflow-hidden rounded-md bg-black">
-            <video ref={videoRef} muted playsInline className={`aspect-video w-full object-cover transition ${state.status === "preview_allowed" ? "" : "blur-xl scale-110 opacity-40"}`} />
-            {state.status !== "preview_allowed" && <div className="absolute inset-0 flex items-center justify-center bg-ink/65 p-5 text-center text-sm font-semibold text-white"><ShieldAlert className="mr-2 h-5 w-5" aria-hidden="true" />{privacyLabel}</div>}
+            <video ref={videoRef} muted playsInline className={`aspect-video w-full object-cover transition ${mirrorPreview ? "scale-x-[-1]" : ""} ${status === "checking_capture" ? "opacity-60" : ""}`} />
+            {status === "checking_capture" && <div className="absolute inset-0 flex items-center justify-center bg-ink/75 p-5 text-center text-sm font-semibold text-white"><ShieldAlert className="mr-2 h-5 w-5" aria-hidden="true" />Checking this photo before adding it…</div>}
           </div>
-          <p className="mt-3 text-sm font-semibold text-sema-blue" aria-live="polite">{privacyLabel}</p>
-          {blocked && <FallbackMessage message="Camera paused for privacy. Sema cannot capture images that may include an intimate area in this public demo. You can describe what you noticed using text or the body map. Concerns involving an intimate area should be discussed directly with a licensed clinician." />}
-          {unavailable && <FallbackMessage message="The on-device privacy check is unavailable, so photo capture has been disabled. You can continue with text or the body map." />}
-          <button type="button" onClick={capture} disabled={!captureAllowed} className="mt-4 inline-flex min-h-12 items-center gap-2 rounded-md bg-sema-blue px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-sema-slate/40"><Camera className="h-4 w-4" aria-hidden="true" />Capture</button>
+          <label className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-md border border-sema-border bg-white px-3 text-xs font-semibold text-sema-slate">
+            <input type="checkbox" checked={mirrorPreview} onChange={(event) => setMirrorPreview(event.target.checked)} />
+            Mirror preview
+          </label>
+          {mirrorPreview && <p className="mt-2 rounded-md border border-sema-border bg-white p-2 text-xs text-sema-slate"><span className="font-semibold text-sema-blue">Mirrored preview.</span> This only changes the live preview. The captured image, Azure moderation input, review image, and PDF keep the camera’s original orientation.</p>}
+          <p className="mt-3 text-sm font-semibold text-sema-blue" aria-live="polite">{message || "Camera ready."}</p>
+          <button type="button" onClick={capture} disabled={status !== "previewing" || moderationInFlight} className="mt-4 inline-flex min-h-12 items-center gap-2 rounded-md bg-sema-blue px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-sema-slate/40"><Camera className="h-4 w-4" aria-hidden="true" />Capture</button>
         </div>
       )}
     </section>
@@ -295,5 +365,5 @@ export function PhotoCapturePanel({ onApprove, onClose, providerFactory = create
 }
 
 function FallbackMessage({ message }: { message: string }) {
-  return <p className="mt-4 rounded-md border border-[#e3c6a0] bg-[#fff8ec] p-4 text-sm leading-6 text-sema-slate">{message}</p>;
+  return <p className="mt-4 whitespace-pre-line rounded-md border border-[#e3c6a0] bg-[#fff8ec] p-4 text-sm leading-6 text-sema-slate">{message}</p>;
 }

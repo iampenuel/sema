@@ -1,4 +1,5 @@
 import type { AgentActionType, AgentContextSnapshot } from "@/lib/agent/agentTypes";
+import type { PacketReadinessDecision } from "@/lib/sema-session/selectors";
 import type { AudioSignal, BodyMapObservation, ConcernType, MotionVisualNote, StructuredSummary } from "@/lib/sema-session/types";
 
 export type SemaAIProviderId = "local" | "gemini" | "gemma4";
@@ -56,6 +57,7 @@ export type ApprovedSessionContent = {
   bodyLocationObservations: BodyMapObservation[];
   audioSignalMetadata: Array<Pick<AudioSignal, "name" | "durationSeconds" | "tags" | "notes">>;
   motionVisualNotes: MotionVisualNote[];
+  packetReadiness?: PacketReadinessDecision;
 };
 
 export type PacketAIInput = { approvedSessionContent: ApprovedSessionContent };

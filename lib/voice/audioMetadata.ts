@@ -34,7 +34,8 @@ export function containsRawAudioFields(value: unknown) {
 
 const ephemeralAudioKeys = new Set([
   "objectUrl", "audioObjectUrl", "audioBlob", "waveformPeaks", "interimTranscript", "stream", "mediaStream",
-  "blob", "file", "base64", "imageData", "pixelBuffer", "tensor", "boundingBoxes", "deviceId", "privacyModelVersion"
+  "blob", "file", "base64", "imageData", "pixelBuffer", "tensor", "boundingBoxes", "deviceId", "privacyModelVersion",
+  "aiDescription", "moderationSeverity", "azureSeverity"
 ]);
 
 export function serializeSemaSession(session: SemaSession) {

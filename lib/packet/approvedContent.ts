@@ -1,4 +1,5 @@
 import type { ApprovedSessionContent } from "@/lib/ai/aiTypes";
+import { getPacketReadinessDecision } from "@/lib/sema-session/selectors";
 import type { SemaSession } from "@/lib/sema-session/types";
 
 export function buildApprovedSessionContent(session: SemaSession): ApprovedSessionContent {
@@ -8,7 +9,8 @@ export function buildApprovedSessionContent(session: SemaSession): ApprovedSessi
     approvedSummary: session.story.summaryStatus === "approved" ? session.story.structuredSummary : undefined,
     bodyLocationObservations: session.bodyLocation,
     audioSignalMetadata: session.audioSignals.map(({ name, durationSeconds, tags, notes }) => ({ name, durationSeconds, tags, notes })),
-    motionVisualNotes: session.motionVisualNotes
+    motionVisualNotes: session.motionVisualNotes,
+    packetReadiness: getPacketReadinessDecision(session)
   };
 }
 

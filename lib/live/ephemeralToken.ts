@@ -1,8 +1,6 @@
-import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { getLiveConfig } from "./liveConfig";
-import { LIVE_SYSTEM_INSTRUCTION } from "./liveSystemInstruction";
 import { buildLiveTokenTimes } from "./liveTokenPolicy";
-import { LIVE_CONTEXT_WINDOW_COMPRESSION } from "./liveConfigCore";
 
 export async function mintGeminiLiveToken(now = Date.now()) {
   const config = getLiveConfig();
@@ -14,22 +12,7 @@ export async function mintGeminiLiveToken(now = Date.now()) {
       uses: 1,
       expireTime: expiresAt.toISOString(),
       newSessionExpireTime: newSessionExpiresAt.toISOString(),
-      httpOptions: { apiVersion: "v1alpha" },
-      liveConnectConstraints: {
-        model: config.model,
-        config: {
-          responseModalities: [Modality.AUDIO],
-          temperature: 0.3,
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voiceName } } },
-          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
-          systemInstruction: LIVE_SYSTEM_INSTRUCTION,
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          sessionResumption: {},
-          contextWindowCompression: LIVE_CONTEXT_WINDOW_COMPRESSION
-        }
-      },
-      lockAdditionalFields: []
+      httpOptions: { apiVersion: "v1alpha" }
     }
   });
   if (!token.name) throw new Error("Gemini did not return an ephemeral token.");

@@ -78,13 +78,13 @@ export function StorySignalCard({
         <button type="button" onClick={onSaveStory} disabled={!session.story.rawText.trim()} className="rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-blue-dark disabled:cursor-not-allowed disabled:text-muted">Save story</button>
         <button type="button" onClick={onGenerateSummary} className="inline-flex items-center gap-2 rounded-md bg-sema-blue px-4 py-2 text-sm font-semibold text-white hover:bg-sema-blue-dark disabled:cursor-not-allowed disabled:bg-muted" disabled={!session.story.rawText.trim() || organizing}>
           {organizing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}
-          {organizing ? "Organizing..." : "Generate organized summary"}
+          {organizing ? "Organizing with AI…" : "Generate organized summary"}
         </button>
         {organizing && onCancelOrganizing ? <button type="button" onClick={onCancelOrganizing} className="inline-flex items-center gap-2 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-slate"><X className="h-4 w-4" aria-hidden="true" />Cancel</button> : null}
         {!voiceOpen ? <button type="button" onClick={onOpenVoice} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-sema-border bg-white px-4 py-2 text-sm font-semibold text-sema-blue-dark"><Mic className="h-4 w-4" aria-hidden="true" />Dictate story</button> : null}
       </div>
       {voiceOpen ? <VoiceCapturePanel capture={capture} hasExistingStory={Boolean(session.story.rawText.trim())} onSaveStory={onSaveVoiceStory} onSaveAudio={onSaveVoiceAudio} onClose={onCloseVoice} /> : null}
-      {organizing ? <p className="mt-3 text-xs font-medium text-sema-slate">Sema is organizing only the information you provided.</p> : null}
+      {organizing ? <p className="mt-3 text-xs font-medium text-sema-slate">Organizing with AI… Sema is using only the information you provided.</p> : null}
       {aiFallbackNotice ? <div className="mt-3"><AIFallbackNotice message={aiFallbackNotice} /></div> : null}
       {aiError ? <div className="mt-3"><AIErrorNotice message={aiError} /></div> : null}
       <div className="mt-5">

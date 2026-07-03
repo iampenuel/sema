@@ -1,8 +1,9 @@
-import { GoogleGenAI, Modality, ThinkingLevel, type LiveConnectConfig } from "@google/genai";
+import { GoogleGenAI, Modality, type LiveConnectConfig } from "@google/genai";
 import { getLiveConfig } from "../liveConfig";
 import { LIVE_SYSTEM_INSTRUCTION } from "../liveSystemInstruction";
 import { LIVE_FUNCTION_DECLARATIONS } from "../liveTools";
 import { buildLiveTokenTimes } from "../liveTokenPolicy";
+import { thinkingLevelToGemini } from "../liveSessionConfig";
 import { createGeminiLiveDiagnosticDependencies } from "./geminiLiveDiagnosticProvider";
 import { classifyDiagnosticFailure, TOKEN_API_VERSION, withDiagnosticTimeout, type LiveDiagnosticCode } from "./liveDiagnosticCore";
 
@@ -10,7 +11,7 @@ export const LIVE_CONSTRAINT_FEATURES = [
   "model",
   "audio_response",
   "voice_kore",
-  "thinking_low",
+  "thinking_medium",
   "system_instruction",
   "input_transcription",
   "output_transcription",
@@ -41,7 +42,7 @@ export function buildConstraintConfig(feature: LiveConstraintFeature, voiceName:
   if (index < 1) return undefined;
   const config: LiveConnectConfig = { responseModalities: [Modality.AUDIO] };
   if (index >= 2) config.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName } } };
-  if (index >= 3) config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+  if (index >= 3) config.thinkingConfig = { thinkingLevel: thinkingLevelToGemini(getLiveConfig().thinkingLevel) };
   if (index >= 4) config.systemInstruction = LIVE_SYSTEM_INSTRUCTION;
   if (index >= 5) config.inputAudioTranscription = {};
   if (index >= 6) config.outputAudioTranscription = {};

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { startTransition, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, RotateCcw, ShieldCheck, X } from "lucide-react";
 import { SemaAgentPanel } from "@/components/agent/SemaAgentPanel";
 import { AudioSignalCard } from "@/components/audio/AudioSignalCard";
@@ -18,6 +18,7 @@ import { useVoiceCapture } from "@/hooks/useVoiceCapture";
 import { useSemaLiveSession } from "@/hooks/useSemaLiveSession";
 import { buildApprovedSessionContent, fingerprintApprovedSessionContent } from "@/lib/packet/approvedContent";
 import { createPacketReviewDraft } from "@/lib/packet/reviewDraft";
+import { getPacketReadinessDecision, packetNotReadyMessage } from "@/lib/sema-session/selectors";
 import { ConcernTypeSelector } from "./ConcernTypeSelector";
 import { MotionVisualSignalFolder } from "./MotionVisualSignalFolder";
 import { ReviewBoard } from "./ReviewBoard";
@@ -33,6 +34,28 @@ const folderLabels: Record<SignalFolderId, string> = {
   motion_visual: "Motion/Visual Signal Folder",
   packet: "Evidence Packet"
 };
+
+type ViewportTarget = "folder_grid" | "story" | "body_location" | "audio" | "motion_visual" | "review_board" | "packet";
+type WorkspaceNavigationResult = {
+  actionType: string;
+  destination: ViewportTarget;
+  stateCommitted: boolean;
+  targetMounted: boolean;
+  viewportAligned: boolean;
+  focusApplied: boolean;
+  success: boolean;
+  failureReason?: "target_not_found" | "render_not_committed" | "navigation_cancelled" | "component_unmounted" | "unknown";
+};
+type PendingViewportIntent = {
+  requestId: number;
+  target: ViewportTarget;
+  source: "voice_agent" | "text_agent" | "manual_card" | "next_step";
+  behavior: "smooth" | "auto";
+};
+
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 export function SessionWorkspace() {
   const {
@@ -80,14 +103,24 @@ export function SessionWorkspace() {
   const storyRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLDivElement | null>(null);
+  const motionRef = useRef<HTMLDivElement | null>(null);
+  const folderGridRef = useRef<HTMLElement | null>(null);
+  const folderGridHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const openFolderHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const reviewBoardRef = useRef<HTMLDivElement | null>(null);
+  const packetHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const packetRef = useRef<HTMLDivElement | null>(null);
   const activePanelRef = useRef<HTMLDivElement | null>(null);
+  const navigationRequestRef = useRef(0);
+  const pendingNavigationResolverRef = useRef<((result: WorkspaceNavigationResult) => void) | null>(null);
+  const [pendingViewportIntent, setPendingViewportIntent] = useState<PendingViewportIntent | null>(null);
   const agentActions = useAgentActions({
     dispatch,
     activePanelRef,
     packetRef,
     getSession: () => session,
-    onNavigate: (folder) => openFolder(folder),
+    onNavigate: (folder) => openFolder(folder, { source: "voice_agent" }),
+    onShowOverview: () => showFolderOverview("voice_agent"),
     onVoiceAction: handleVoiceAgentAction,
     onOpenPhotoCapture: () => {
       setActiveFolder("motion_visual");
@@ -98,16 +131,86 @@ export function SessionWorkspace() {
   });
   const live = useSemaLiveSession({ session, executeAction: agentActions.execute, onSafetyFlags: (flags) => dispatch({ type: "add_safety_flags", flags }) });
 
-  function openFolder(folder: SignalFolderId, scroll = true) {
+  function resolveNavigation(result: WorkspaceNavigationResult) {
+    pendingNavigationResolverRef.current?.(result);
+    pendingNavigationResolverRef.current = null;
+  }
+
+  function targetElement(target: ViewportTarget) {
+    if (target === "folder_grid") return folderGridRef.current;
+    if (target === "packet") return packetRef.current;
+    if (target === "review_board") return reviewBoardRef.current;
+    return activePanelRef.current;
+  }
+
+  function targetHeading(target: ViewportTarget) {
+    if (target === "folder_grid") return folderGridHeadingRef.current;
+    if (target === "packet") return packetHeadingRef.current;
+    if (target === "review_board") return reviewBoardRef.current?.querySelector<HTMLElement>("#review-board-title") ?? null;
+    return openFolderHeadingRef.current;
+  }
+
+  function queueViewportIntent(target: ViewportTarget, source: PendingViewportIntent["source"]) {
+    const requestId = navigationRequestRef.current + 1;
+    navigationRequestRef.current = requestId;
+    resolveNavigation({ actionType: "navigate", destination: target, stateCommitted: false, targetMounted: false, viewportAligned: false, focusApplied: false, success: false, failureReason: "navigation_cancelled" });
+    setPendingViewportIntent({ requestId, target, source, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    return new Promise<WorkspaceNavigationResult>((resolve) => {
+      pendingNavigationResolverRef.current = resolve;
+    });
+  }
+
+  useLayoutEffect(() => {
+    if (!pendingViewportIntent) return;
+    const intent = pendingViewportIntent;
+    let cancelled = false;
+    const firstFrame = window.requestAnimationFrame(() => {
+      const secondFrame = window.requestAnimationFrame(() => {
+        if (cancelled || navigationRequestRef.current !== intent.requestId) return;
+        const element = targetElement(intent.target);
+        const heading = targetHeading(intent.target);
+        if (!element || !heading) {
+          resolveNavigation({ actionType: "navigate", destination: intent.target, stateCommitted: true, targetMounted: Boolean(element), viewportAligned: false, focusApplied: false, success: false, failureReason: "target_not_found" });
+          setPendingViewportIntent(null);
+          return;
+        }
+        element.scrollIntoView({ behavior: intent.behavior, block: "start" });
+        heading.focus({ preventScroll: true });
+        resolveNavigation({ actionType: "navigate", destination: intent.target, stateCommitted: true, targetMounted: true, viewportAligned: true, focusApplied: document.activeElement === heading, success: true });
+        setPendingViewportIntent(null);
+      });
+      return () => window.cancelAnimationFrame(secondFrame);
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(firstFrame);
+    };
+  }, [pendingViewportIntent, session.activeFolder]);
+
+  function openFolder(folder: SignalFolderId, options: { source?: PendingViewportIntent["source"]; scroll?: boolean } = {}) {
+    const { source = "manual_card", scroll = true } = options;
     if (folder !== "motion_visual") setPhotoCaptureOpen(false);
+    setAgentOpen(false);
     if (voicePanelTarget && folder !== voicePanelTarget) {
       const hasVoiceWork = Boolean(voiceCapture.state.audioBlob || voiceCapture.state.transcriptDraft.trim() || voiceCapture.state.elapsedSeconds);
-      if (hasVoiceWork && !window.confirm("Leave voice capture and delete the unsaved browser-local draft?")) return;
+      if (hasVoiceWork && !window.confirm("Leave voice capture and delete the unsaved browser-local draft?")) {
+        return Promise.resolve<WorkspaceNavigationResult>({ actionType: "navigate", destination: folder, stateCommitted: false, targetMounted: false, viewportAligned: false, focusApplied: false, success: false, failureReason: "navigation_cancelled" });
+      }
       voiceCapture.cancel();
       setVoicePanelTarget(null);
     }
     setActiveFolder(folder);
-    if (scroll) window.setTimeout(() => (folder === "packet" ? packetRef.current : activePanelRef.current)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    return scroll ? queueViewportIntent(folder, source) : Promise.resolve<WorkspaceNavigationResult>({ actionType: "navigate", destination: folder, stateCommitted: true, targetMounted: true, viewportAligned: false, focusApplied: false, success: true });
+  }
+
+  function showFolderOverview(source: PendingViewportIntent["source"] = "manual_card") {
+    setAgentOpen(false);
+    return queueViewportIntent("folder_grid", source);
+  }
+
+  function markCurrentFolderNotApplicable() {
+    if (session.activeFolder === "story" || session.activeFolder === "packet") return;
+    dispatch({ type: "mark_folder_not_applicable", folder: session.activeFolder });
   }
 
   function openVoicePanel(target: VoiceTargetFolder) {
@@ -125,7 +228,7 @@ export function SessionWorkspace() {
     switch (action.type) {
       case "requestMicrophonePermission":
       case "startVoiceCapture":
-        setActiveFolder(requestedTarget);
+        void openFolder(requestedTarget, { source: "voice_agent" });
         openVoicePanel(requestedTarget);
         return "Voice controls are open. Use Allow microphone and Start recording when you are ready; Sema cannot start the microphone for you.";
       case "stopVoiceCapture":
@@ -139,12 +242,12 @@ export function SessionWorkspace() {
         return "The browser-local recording was cancelled. Nothing was added to the session.";
       }
       case "openVoiceDraftReview":
-        setActiveFolder(voiceCapture.state.targetFolder);
+        void openFolder(voiceCapture.state.targetFolder, { source: "voice_agent" });
         setVoicePanelTarget(voiceCapture.state.targetFolder);
         return voiceCapture.state.status === "reviewing" ? "The voice draft is open for review." : "There is no completed voice draft yet. The recording controls are open.";
       case "saveVoiceDraftToFolder":
         voiceCapture.setTarget(requestedTarget);
-        setActiveFolder(requestedTarget);
+        void openFolder(requestedTarget, { source: "voice_agent" });
         setVoicePanelTarget(requestedTarget);
         return "The voice review is open with the requested folder selected. Review the text and use the approval control before saving.";
       case "discardVoiceDraft":
@@ -176,7 +279,7 @@ export function SessionWorkspace() {
       ephemeralPhotos.clear();
       setPhotoCaptureOpen(false);
       clearSession();
-      setActiveFolder("story");
+      void openFolder("story", { source: "manual_card" });
     }
   }
 
@@ -203,14 +306,18 @@ export function SessionWorkspace() {
     try {
       const response = await extractStoryWithAI(session.story.rawText, session.concernType, controller.signal);
       if (controller.signal.aborted) return;
-      setSummaryDraft(storyDraftToSummary(response.draft));
-      setStoryFallbackNotice(response.fallbackNotice ?? null);
+      startTransition(() => {
+        setSummaryDraft(storyDraftToSummary(response.draft));
+        setStoryFallbackNotice(response.fallbackNotice ?? null);
+      });
     } catch (error) {
       if (controller.signal.aborted) return;
       const mustNotFallback = error instanceof AIClientError && (error.code === "safety_blocked" || error.code === "validation_failed");
       if (!mustNotFallback) {
-        generateSummary();
-        setStoryFallbackNotice("AI enhancement is temporarily unavailable. Sema is continuing in local mode, and your saved session data is still available.");
+        startTransition(() => {
+          generateSummary();
+          setStoryFallbackNotice("AI organization is temporarily unavailable; a local draft was prepared instead.");
+        });
       }
       setStoryAIError(error instanceof Error ? error.message : "Sema could not organize this story right now.");
     } finally {
@@ -220,6 +327,11 @@ export function SessionWorkspace() {
   }
 
   async function requestPacketNarrative() {
+    const readiness = getPacketReadinessDecision(session);
+    if (!readiness.ready) {
+      setPacketAIError(packetNotReadyMessage(readiness));
+      return;
+    }
     if (session.story.summaryStatus !== "approved") {
       setPacketAIError("Approve the story draft before drafting packet narrative content.");
       return;
@@ -236,8 +348,10 @@ export function SessionWorkspace() {
       const approvedContent = buildApprovedSessionContent(session);
       const response = await draftPacketWithAI(approvedContent, controller.signal);
       if (controller.signal.aborted) return;
-      setPacketNarrativeDraft(createPacketReviewDraft(response.draft, response.metadata.provider, fingerprintApprovedSessionContent(approvedContent)));
-      setPacketFallbackNotice(response.fallbackNotice ?? null);
+      startTransition(() => {
+        setPacketNarrativeDraft(createPacketReviewDraft(response.draft, response.metadata.provider, fingerprintApprovedSessionContent(approvedContent)));
+        setPacketFallbackNotice(response.fallbackNotice ?? null);
+      });
     } catch (error) {
       if (!controller.signal.aborted) setPacketAIError(error instanceof Error ? error.message : "Sema could not draft packet content right now.");
     } finally {
@@ -247,6 +361,11 @@ export function SessionWorkspace() {
   }
 
   function requestPreparePacket() {
+    const readiness = getPacketReadinessDecision(session);
+    if (!readiness.ready) {
+      setPacketAIError(packetNotReadyMessage(readiness));
+      return false;
+    }
     const decision = evaluatePermission(createAgentAction("prepareEvidencePacket"));
     if (!window.confirm(decision.message)) return true;
     return preparePacket();
@@ -283,39 +402,46 @@ export function SessionWorkspace() {
 
           <ConcernTypeSelector value={session.concernType} onChange={setConcernType} />
 
-          <SignalFolderGrid session={session} activeFolder={session.activeFolder} onOpen={openFolder} />
+          <SignalFolderGrid session={session} activeFolder={session.activeFolder} onOpen={(folder) => void openFolder(folder, { source: "manual_card" })} sectionRef={folderGridRef} headingRef={folderGridHeadingRef} />
 
-          {session.activeFolder !== "packet" && <section ref={activePanelRef} className="scroll-mt-24" aria-labelledby="open-folder-title">
+          {session.activeFolder !== "packet" && <section ref={activePanelRef} className="scroll-mt-24" aria-labelledby="open-folder-title" data-workspace-target={session.activeFolder}>
             <div className="mb-3 flex items-center justify-between gap-3 rounded-t-lg border border-b-0 border-sema-border border-l-sema-blue bg-[#f8fbfd] px-4 py-3 shadow-sm">
               <div>
                 <p className="text-xs font-bold text-sema-blue">OPEN FOLDER</p>
-                <h2 id="open-folder-title" className="mt-1 text-lg font-bold text-ink">{folderLabels[session.activeFolder]}</h2>
+                <h2 id="open-folder-title" ref={openFolderHeadingRef} tabIndex={-1} className="mt-1 text-lg font-bold text-ink outline-none focus-visible:ring-2 focus-visible:ring-sema-blue">{folderLabels[session.activeFolder]}</h2>
               </div>
-              <button type="button" onClick={() => document.getElementById("signal-folders-title")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-sema-blue-dark hover:text-sema-blue">
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Back to folders
-              </button>
+              <div className="flex flex-wrap justify-end gap-2">
+                {session.activeFolder !== "story" && (
+                  <button type="button" onClick={markCurrentFolderNotApplicable} className="inline-flex min-h-10 items-center rounded-md border border-sema-border bg-white px-3 text-sm font-semibold text-sema-blue-dark hover:border-sema-blue">
+                    Not applicable
+                  </button>
+                )}
+                <button type="button" onClick={() => void showFolderOverview("manual_card")} className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-sema-blue-dark hover:text-sema-blue">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Back to folders
+                </button>
+              </div>
             </div>
 
             {session.activeFolder === "story" && (
               <div ref={storyRef}>
                 <StorySignalCard session={session} onStoryChange={updateStory} onSaveStory={saveStory} onGenerateSummary={requestGenerateSummary} onLoadDemo={loadDemo} onSummaryChange={updateStructuredSummary} organizing={storyOrganizing} onCancelOrganizing={() => storyAbortRef.current?.abort()} aiFallbackNotice={storyFallbackNotice} aiError={storyAIError} capture={voiceCapture} voiceOpen={voicePanelTarget === "story"} onOpenVoice={() => openVoicePanel("story")} onCloseVoice={closeVoicePanel} onSaveVoiceStory={saveVoiceToStory} onSaveVoiceAudio={saveVoiceToAudio} />
-                <FolderContinue onClick={() => openFolder("body_location")} label="Save and continue to Body/Location Signal" />
+                <FolderContinue onClick={() => void openFolder("body_location", { source: "next_step" })} label="Save and continue to Body/Location Signal" />
               </div>
             )}
             {session.activeFolder === "body_location" && (
               <div ref={bodyRef}>
                 <BodyMapSignalCard session={session} onAdd={addBodyObservation} onRemove={removeBodyObservation} />
-                <FolderContinue onClick={() => openFolder("audio")} label="Save and continue to Audio Signal" />
+                <FolderContinue onClick={() => void openFolder("audio", { source: "next_step" })} label="Save and continue to Audio Signal" />
               </div>
             )}
             {session.activeFolder === "audio" && (
               <div ref={audioRef}>
                 <AudioSignalCard session={session} onAdd={addAudioSignal} onRemove={removeAudioSignal} capture={voiceCapture} voiceOpen={voicePanelTarget === "audio"} onOpenVoice={() => openVoicePanel("audio")} onCloseVoice={closeVoicePanel} onSaveVoiceStory={saveVoiceToStory} onSaveVoiceAudio={saveVoiceToAudio} />
-                <FolderContinue onClick={() => openFolder("motion_visual")} label="Continue to optional Motion/Visual Signal" />
+                <FolderContinue onClick={() => void openFolder("motion_visual", { source: "next_step" })} label="Continue to Motion/Visual Signal" />
               </div>
             )}
-            {session.activeFolder === "motion_visual" && <MotionVisualSignalFolder
+            {session.activeFolder === "motion_visual" && <div ref={motionRef}><MotionVisualSignalFolder
               notes={session.motionVisualNotes}
               photos={session.photoObservations}
               photoCaptureOpen={photoCaptureOpen}
@@ -326,13 +452,14 @@ export function SessionWorkspace() {
               onRemovePhoto={removePhoto}
               getRuntimePhoto={ephemeralPhotos.get}
               onSave={addMotionVisualNote}
-            />}
+            /></div>}
           </section>}
 
+          <div ref={reviewBoardRef} className="scroll-mt-24" data-workspace-target="review_board">
           <ReviewBoard
             session={session}
             onApprove={approveStructuredSummary}
-            onEdit={() => openFolder("story")}
+            onEdit={() => void openFolder("story", { source: "manual_card" })}
             onDiscard={discardStructuredSummary}
             onRegenerateStory={requestGenerateSummary}
             onPrepare={requestPreparePacket}
@@ -345,11 +472,12 @@ export function SessionWorkspace() {
             packetFallbackNotice={packetFallbackNotice}
             packetError={packetAIError}
           />
+          </div>
 
-          <PacketReadinessCard session={session} onPrepare={requestPreparePacket} />
+          <PacketReadinessCard session={session} onPrepare={requestPreparePacket} onNavigate={(folder) => void openFolder(folder, { source: "manual_card" })} />
 
-          <div ref={packetRef} className="scroll-mt-24">
-            <EvidencePacketPreview packet={session.packetDraft} runtimePhotos={ephemeralPhotos.attachments(new Set(session.packetDraft?.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => photo.id) ?? []))} />
+          <div ref={packetRef} className="scroll-mt-24" data-workspace-target="packet">
+            <EvidencePacketPreview packet={session.packetDraft} readiness={getPacketReadinessDecision(session)} headingRef={packetHeadingRef} runtimePhotos={ephemeralPhotos.attachments(new Set(session.packetDraft?.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => photo.id) ?? []))} />
           </div>
         </div>
       </div>

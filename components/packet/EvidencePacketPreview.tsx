@@ -3,10 +3,11 @@
 import { FileText, ShieldCheck } from "lucide-react";
 import { PdfExportButton } from "./PdfExportButton";
 import type { EvidencePacket } from "@/lib/sema-session/types";
+import type { PacketReadinessDecision } from "@/lib/sema-session/selectors";
 import type { RuntimePhotoAttachment } from "@/lib/photo/types";
 import { concernTypeLabels, signalTypeLabels } from "@/lib/sema-session/types";
 
-export function EvidencePacketPreview({ packet, runtimePhotos = [] }: { packet?: EvidencePacket; runtimePhotos?: RuntimePhotoAttachment[] }) {
+export function EvidencePacketPreview({ packet, runtimePhotos = [], readiness, headingRef }: { packet?: EvidencePacket; runtimePhotos?: RuntimePhotoAttachment[]; readiness?: PacketReadinessDecision; headingRef?: React.RefObject<HTMLHeadingElement | null> }) {
   if (!packet) {
     return (
       <section className="rounded-lg border border-sema-border bg-[#dceaf4] p-3 shadow-card" aria-labelledby="packet-title">
@@ -14,7 +15,7 @@ export function EvidencePacketPreview({ packet, runtimePhotos = [] }: { packet?:
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-bold text-sema-blue">EVIDENCE PACKET PREVIEW</p>
-              <h2 id="packet-title" className="mt-1 font-editorial text-3xl font-semibold text-ink">Sema Evidence Packet</h2>
+              <h2 id="packet-title" ref={headingRef} tabIndex={-1} className="mt-1 font-editorial text-3xl font-semibold text-ink outline-none focus-visible:ring-2 focus-visible:ring-sema-blue">Sema Evidence Packet</h2>
             </div>
             <span className="rounded-full bg-[#f1f5f8] px-3 py-1 text-xs font-semibold text-sema-slate">Not prepared</span>
           </div>
@@ -39,11 +40,11 @@ export function EvidencePacketPreview({ packet, runtimePhotos = [] }: { packet?:
             <FileText className="h-4 w-4" aria-hidden="true" />
             GENERATED FROM PATIENT-PROVIDED INFORMATION
           </p>
-          <h2 id="packet-title" className="mt-2 font-editorial text-3xl font-semibold text-ink">Sema Evidence Packet</h2>
+          <h2 id="packet-title" ref={headingRef} tabIndex={-1} className="mt-2 font-editorial text-3xl font-semibold text-ink outline-none focus-visible:ring-2 focus-visible:ring-sema-blue">Sema Evidence Packet</h2>
           <p className="mt-1 text-sm text-muted">Generated {new Date(packet.generatedAt).toLocaleString()}</p>
           <p className="mt-1 text-sm text-muted">Concern type: {packet.concernType ? concernTypeLabels[packet.concernType] : "Not selected"}</p>
         </div>
-        <PdfExportButton packet={packet} runtimePhotos={runtimePhotos} />
+        <PdfExportButton packet={packet} runtimePhotos={runtimePhotos} readiness={readiness} />
       </div>
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -117,11 +118,11 @@ export function EvidencePacketPreview({ packet, runtimePhotos = [] }: { packet?:
 
       {packet.photoObservations.filter((photo) => photo.includeInPacket).length > 0 && <section className="mt-6 rounded-md border border-sema-border bg-white p-4">
         <h3 className="font-semibold text-ink">Patient-provided photos</h3>
-        <p className="mt-1 text-xs font-semibold text-sema-blue">Not clinically analyzed</p>
+        <p className="mt-1 text-xs font-semibold text-sema-blue">Passed automated content screening · Not clinically analyzed</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">{packet.photoObservations.filter((photo) => photo.includeInPacket).map((photo) => {
           const runtime = runtimePhotos.find((attachment) => attachment.metadata.id === photo.id);
           return <article key={photo.id} className="rounded-md border border-sema-border p-3">
-            {runtime?.blob ? <p className="text-sm text-sema-slate">Approved current-tab photo will be included in the PDF.</p> : <p className="text-sm text-sema-slate">Photo was not retained by Sema after the browser session.</p>}
+            {runtime?.blob ? <p className="text-sm text-sema-slate">Approved current-tab photo will be included in the PDF.</p> : <p className="text-sm text-sema-slate">Original photo was not retained after the browser session.</p>}
             <p className="mt-2 text-sm text-sema-slate">{photo.note || "No note added."}</p>
           </article>;
         })}</div>

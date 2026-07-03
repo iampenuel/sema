@@ -7,4 +7,4 @@ export class SemaAIError extends Error {
   }
 }
 
-export const SAFE_AI_ERROR_MESSAGE = "AI enhancement is temporarily unavailable. Sema is continuing in local mode, and your saved session data is still available.";
+export const SAFE_AI_ERROR_MESSAGE = "AI organization is temporarily unavailable; a local draft was prepared instead.";

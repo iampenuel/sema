@@ -6,13 +6,20 @@ import { createAgentAction } from "@/lib/agent/actionRegistry";
 import { evaluatePermission } from "@/lib/agent/permissionGate";
 import { downloadEvidencePacketPdf } from "@/lib/packet/pdfExport";
 import type { EvidencePacket } from "@/lib/sema-session/types";
+import type { PacketReadinessDecision } from "@/lib/sema-session/selectors";
+import { packetNotReadyMessage } from "@/lib/sema-session/selectors";
 import type { RuntimePhotoAttachment } from "@/lib/photo/types";
 
-export function PdfExportButton({ packet, runtimePhotos = [] }: { packet: EvidencePacket; runtimePhotos?: RuntimePhotoAttachment[] }) {
+export function PdfExportButton({ packet, runtimePhotos = [], readiness }: { packet: EvidencePacket; runtimePhotos?: RuntimePhotoAttachment[]; readiness?: PacketReadinessDecision }) {
   const [status, setStatus] = useState<"idle" | "generating" | "downloaded" | "error">("idle");
+  const [notice, setNotice] = useState("");
 
   async function handleDownload() {
     if (status === "generating") return;
+    if (readiness && !readiness.ready) {
+      setNotice(packetNotReadyMessage(readiness));
+      return;
+    }
     const decision = evaluatePermission(createAgentAction("exportPacketPdf"));
     const ok = window.confirm(decision.message);
 
@@ -21,6 +28,7 @@ export function PdfExportButton({ packet, runtimePhotos = [] }: { packet: Eviden
       try {
         await downloadEvidencePacketPdf(packet, runtimePhotos);
         setStatus("downloaded");
+        setNotice("");
       } catch {
         setStatus("error");
       }
@@ -34,7 +42,7 @@ export function PdfExportButton({ packet, runtimePhotos = [] }: { packet: Eviden
         {status === "generating" ? "Creating PDF..." : "Download Evidence Packet"}
       </button>
       <p className={`mt-1 max-w-56 text-xs ${status === "error" ? "text-red-700" : "text-sema-slate"}`} role="status" aria-live="polite">
-        {status === "downloaded" ? "The evidence packet PDF was downloaded." : status === "error" ? "Sema could not create the PDF. Your packet is still available." : ""}
+        {notice || (status === "downloaded" ? "The evidence packet PDF was downloaded." : status === "error" ? "Sema could not create the PDF. Your packet is still available." : "")}
       </p>
     </div>
   );

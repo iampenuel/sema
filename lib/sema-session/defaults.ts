@@ -3,13 +3,12 @@ import type { SemaSession } from "./types";
 export function createEmptySession(): SemaSession {
   return {
     id: "session-local",
-    concernType: "pain_injury",
     activeFolder: "story",
     folderStatus: {
       story: "empty",
       body_location: "empty",
       audio: "empty",
-      motion_visual: "optional",
+      motion_visual: "empty",
       packet: "empty"
     },
     story: { rawText: "" },

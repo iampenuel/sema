@@ -9,7 +9,7 @@ export type ConcernType =
 
 export type SignalFolderId = "story" | "body_location" | "audio" | "motion_visual" | "packet";
 
-export type FolderStatus = "empty" | "in_progress" | "saved" | "needs_review" | "optional" | "planned_later";
+export type FolderStatus = "empty" | "in_progress" | "saved" | "needs_review" | "optional" | "planned_later" | "not_applicable";
 
 export type TimelineItem = {
   id: string;

@@ -1,79 +1,94 @@
-export type PhotoPrivacyProviderId = "local_model" | "mock" | "unavailable";
+export type CameraFacingMode =
+  | "user"
+  | "environment"
+  | "left"
+  | "right"
+  | "unknown";
 
-export type PhotoPrivacyDecision = "allowed" | "blocked" | "uncertain";
+export type RequestedCameraFacingMode = "user" | "environment" | "unspecified";
 
-export type PhotoPrivacyReasonCode =
-  | "clear"
-  | "potentially_intimate"
-  | "low_confidence"
-  | "model_unavailable"
-  | "model_loading"
-  | "model_error"
-  | "frame_invalid"
-  | "result_stale";
-
-export type PhotoPrivacyResult = {
-  decision: PhotoPrivacyDecision;
-  confidence?: number;
-  reasonCode: PhotoPrivacyReasonCode;
-  modelVersion?: string;
-  latencyMs?: number;
-  evaluatedAt: number;
+export type CameraFacingEvidence = {
+  requestedFacingMode: RequestedCameraFacingMode;
+  reportedFacingMode: CameraFacingMode;
 };
 
 export type PhotoCaptureStatus =
   | "idle"
-  | "consent_required"
+  | "azure_disclosure_required"
   | "requesting_permission"
-  | "permission_denied"
   | "camera_unavailable"
-  | "loading_privacy_guard"
+  | "permission_denied"
   | "previewing"
-  | "checking_preview"
-  | "preview_allowed"
-  | "preview_blocked"
-  | "preview_uncertain"
   | "capturing"
   | "checking_capture"
   | "reviewing"
   | "saving"
   | "saved"
   | "discarded"
+  | "moderation_uncertain"
+  | "moderation_blocked"
+  | "moderation_unavailable"
   | "error";
+
+export type AzurePhotoModerationProvider = "azure_content_safety";
+
+export type PhotoModerationOutcome =
+  | "allowed"
+  | "uncertain"
+  | "blocked"
+  | "unavailable";
+
+export type PhotoModerationFailureCode =
+  | "consent_required"
+  | "disabled"
+  | "validation_failed"
+  | "unsupported_mime"
+  | "invalid_image"
+  | "too_large"
+  | "too_small"
+  | "too_wide"
+  | "timeout"
+  | "rate_limited"
+  | "provider_unavailable"
+  | "malformed_response"
+  | "network_error"
+  | "unknown_error";
+
+export type PhotoModerationStatus = {
+  available: boolean;
+  provider: AzurePhotoModerationProvider;
+};
+
+export type PhotoModerationResponse = {
+  outcome: PhotoModerationOutcome;
+  provider: AzurePhotoModerationProvider;
+  requestId: string;
+  message: string;
+  code?: PhotoModerationFailureCode;
+};
 
 export type PhotoObservationMetadata = {
   id: string;
   createdAt: string;
   width: number;
   height: number;
-  mimeType: string;
+  mimeType: "image/jpeg";
   sizeBytes: number;
   note: string;
   bodyLocation?: string;
   tags: string[];
   includeInPacket: boolean;
   source: "patient_camera_capture";
-  privacyGuardStatus: "allowed_on_device";
+  privacyGuardStatus: "passed_automated_content_screening";
   availability: "current_tab_only";
 };
 
 export type EphemeralPhotoDraft = PhotoObservationMetadata & {
   blob: Blob;
   objectUrl: string;
-  privacyDecision: "allowed";
-  privacyModelVersion?: string;
+  moderationProvider: AzurePhotoModerationProvider;
   status: "needs_review" | "approved" | "discarded";
 };
-
-export type PhotoFrameSource = CanvasImageSource | ImageData;
-
-export interface PhotoPrivacyProvider {
-  readonly id: PhotoPrivacyProviderId;
-  readonly isDevelopmentSimulation?: boolean;
-  load(): Promise<void>;
-  evaluate(frame: PhotoFrameSource): Promise<PhotoPrivacyResult>;
-  dispose(): void | Promise<void>;
-}
 
 export type RuntimePhotoAttachment = {
   metadata: PhotoObservationMetadata;

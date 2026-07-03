@@ -1,39 +1,53 @@
 import type { SemaSession } from "@/lib/sema-session/types";
 import { getMissingDetails } from "@/lib/sema-session/selectors";
-import { getSessionReadiness } from "@/lib/sema-session/selectors";
+import { getPacketReadinessDecision, getSessionReadiness } from "@/lib/sema-session/selectors";
 import { LIVE_TOOL_NAMES } from "./liveTools";
 
 export type LiveSessionContext = ReturnType<typeof buildLiveSessionContext>;
 
 export function buildLiveSessionContext(session: SemaSession, pendingPermission?: string) {
-  const approvedSummary = session.story.summaryStatus === "approved" ? session.story.structuredSummary : undefined;
+  const readiness = getSessionReadiness(session);
+  const packetReadiness = getPacketReadinessDecision(session);
+  const completeRequired = readiness.filter((item) => !("optional" in item && item.optional));
+  const completedRequired = completeRequired.filter((item) => item.complete);
+  const packetStatus = session.packetNarrativeDraft?.status === "needs_review"
+    ? "draft_needs_review"
+    : session.packetDraft
+      ? "approved"
+      : completedRequired.length === completeRequired.length && completedRequired.length > 0
+        ? "ready_to_prepare"
+        : completedRequired.length > 0
+          ? "partially_ready"
+          : "not_ready";
   return {
+    contextVersion: 2,
+    contextKind: "application_context_not_patient_evidence",
     route: "/session",
     activeFolder: session.activeFolder,
-    concernType: session.concernType ?? "not_selected",
+    concernType: session.concernType,
     folderStatus: session.folderStatus,
-    approvedStory: approvedSummary ? {
-      mainConcern: approvedSummary.mainConcern,
-      timeline: approvedSummary.timeline.slice(0, 6).map((item) => ({ label: item.label, detail: item.detail })),
-      changesOverTime: approvedSummary.changesOverTime.slice(0, 6)
-    } : null,
-    observations: {
-      bodyLocationCount: session.bodyLocation.length,
-      bodyRegions: [...new Set(session.bodyLocation.map((item) => item.regionLabel))].slice(0, 8),
-      audioCount: session.audioSignals.length,
-      audioTags: [...new Set(session.audioSignals.flatMap((item) => item.tags))].slice(0, 8),
-      motionVisualNoteCount: session.motionVisualNotes.length
+    counts: {
+      bodyObservations: session.bodyLocation.length,
+      audioSignals: session.audioSignals.length,
+      motionVisualItems: session.motionVisualNotes.length + session.photoObservations.length,
+      reviewItems: session.draftCaptures.filter((draft) => draft.status === "needs_review").length + (session.packetNarrativeDraft?.status === "needs_review" ? 1 : 0),
+      approvedReviewItems: session.draftCaptures.filter((draft) => draft.status === "approved").length + (session.packetNarrativeDraft?.status === "approved" ? 1 : 0)
     },
-    review: {
-      storySummary: session.story.summaryStatus ?? "not_started",
-      packetNarrative: session.packetNarrativeDraft?.status ?? "not_started",
-      packetPrepared: Boolean(session.packetDraft)
+    packetStatus,
+    packetReadiness: {
+      ready: packetReadiness.ready,
+      missingRequirements: packetReadiness.unresolvedRequirements.map((item) => ({ key: item.key, label: item.label, reason: item.reason })),
+      nextRequiredDestination: packetReadiness.nextRequiredDestination,
+      pendingReviewCount: packetReadiness.pendingReviewCount,
+      packetStale: packetReadiness.packetStale
     },
-    packetReadiness: getSessionReadiness(session).map((item) => ({ id: item.id, complete: item.complete, optional: Boolean(item.optional) })),
     missingDetails: getMissingDetails(session).slice(0, 8),
     activeSafetyFlags: session.safetyFlags.map((flag) => ({ type: flag.type, severity: flag.severity })).slice(-8),
-    pendingPermission: pendingPermission ?? null,
-    allowedActions: LIVE_TOOL_NAMES
+    pendingPermission: pendingPermission ? { actionType: pendingPermission } : undefined,
+    demoMode: true,
+    safetyMode: true,
+    allowedActions: LIVE_TOOL_NAMES,
+    contextDelivery: "read_only_tool"
   };
 }
 

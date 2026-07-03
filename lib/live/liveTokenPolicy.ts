@@ -30,7 +30,7 @@ export function isSameOriginRequest(request: Request) {
 }
 
 export function safeTokenResponse(token: string, expiresAt: string, status: LivePublicStatus): LiveTokenResponse {
-  return { token, expiresAt, model: status.model, voiceName: status.voiceName };
+  return { token, expiresAt, model: status.model, voiceName: status.voiceName, thinkingLevel: status.thinkingLevel };
 }
 
 export function buildLiveTokenTimes(now: number, maxSessionMinutes: number) {

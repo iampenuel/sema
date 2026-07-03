@@ -1,9 +1,10 @@
-import { getMissingDetails } from "@/lib/sema-session/selectors";
+import { getMissingDetails, getPacketReadinessDecision } from "@/lib/sema-session/selectors";
 import type { SemaSession } from "@/lib/sema-session/types";
 import { MODEL_CALLABLE_AGENT_ACTIONS } from "./actionRegistry";
 import type { AgentContextSnapshot } from "./agentTypes";
 
 export function buildAgentContext(session: SemaSession, currentRoute: string): AgentContextSnapshot {
+  const packetReadiness = getPacketReadinessDecision(session);
   return {
     currentRoute,
     activeFolder: session.activeFolder,
@@ -16,6 +17,7 @@ export function buildAgentContext(session: SemaSession, currentRoute: string): A
     audioSignalCount: session.audioSignals.length,
     motionVisualNoteCount: session.motionVisualNotes.length,
     hasPacketDraft: Boolean(session.packetDraft),
+    packetReadiness,
     missingDetails: getMissingDetails(session),
     safetyFlags: session.safetyFlags,
     availableActions: MODEL_CALLABLE_AGENT_ACTIONS
